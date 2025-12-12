@@ -1,0 +1,956 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Draw.io → SVG/PNG 変換</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pako/2.1.0/pako.min.js"></script>
+    <script>
+        if (typeof pako === 'undefined') {
+            document.write('<script src="https://unpkg.com/pako@2.1.0/dist/pako.min.js"><\/script>');
+        }
+    </script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        :root {
+            --primary: #4f46e5;
+            --primary-dark: #4338ca;
+            --success: #10b981;
+            --error: #ef4444;
+            --bg: #f8fafc;
+            --card: #ffffff;
+            --text: #1e293b;
+            --text-light: #64748b;
+            --border: #e2e8f0;
+            --radius: 12px;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            min-height: 100vh;
+            line-height: 1.5;
+        }
+        .container { max-width: 900px; margin: 0 auto; padding: 20px; }
+        h1 { font-size: 1.5rem; font-weight: 700; text-align: center; margin-bottom: 20px; color: var(--primary); }
+        .card { background: var(--card); border-radius: var(--radius); box-shadow: 0 1px 3px rgba(0,0,0,0.1); padding: 20px; margin-bottom: 16px; }
+        .card-title { font-size: 0.875rem; font-weight: 600; color: var(--text-light); margin-bottom: 12px; text-transform: uppercase; letter-spacing: 0.5px; }
+        .drop-zone { border: 2px dashed var(--border); border-radius: var(--radius); padding: 40px 20px; text-align: center; cursor: pointer; transition: all 0.2s; background: #f1f5f9; }
+        .drop-zone:hover, .drop-zone.active { border-color: var(--primary); background: #eef2ff; }
+        .drop-zone-icon { font-size: 48px; margin-bottom: 12px; }
+        .drop-zone-text { font-size: 1rem; font-weight: 500; margin-bottom: 4px; }
+        .drop-zone-hint { font-size: 0.875rem; color: var(--text-light); }
+        .file-info { display: flex; align-items: center; gap: 12px; padding: 12px; background: #f1f5f9; border-radius: 8px; cursor: pointer; }
+        .file-icon { font-size: 32px; }
+        .file-details { flex: 1; }
+        .file-name { font-weight: 600; word-break: break-all; }
+        .file-meta { font-size: 0.875rem; color: var(--text-light); }
+        .btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; padding: 12px 20px; border: none; border-radius: 8px; font-size: 1rem; font-weight: 600; cursor: pointer; transition: all 0.15s; width: 100%; }
+        .btn-success { background: var(--success); color: white; }
+        .btn-success:hover { background: #059669; }
+        .options-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+        .option-btn { padding: 16px; border: 2px solid var(--border); border-radius: 8px; background: white; cursor: pointer; text-align: center; transition: all 0.15s; }
+        .option-btn:hover { border-color: var(--primary); }
+        .option-btn.selected { border-color: var(--primary); background: #eef2ff; }
+        .option-icon { font-size: 24px; margin-bottom: 4px; }
+        .option-label { font-weight: 600; }
+        .option-desc { font-size: 0.75rem; color: var(--text-light); }
+        .scale-control { display: flex; align-items: center; gap: 12px; }
+        .scale-control input[type="range"] { flex: 1; height: 8px; -webkit-appearance: none; background: var(--border); border-radius: 4px; }
+        .scale-control input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; width: 24px; height: 24px; background: var(--primary); border-radius: 50%; cursor: pointer; }
+        .scale-value { font-weight: 600; min-width: 40px; text-align: right; }
+        .preview-area { background: #f1f5f9; border-radius: 8px; min-height: 200px; display: flex; align-items: center; justify-content: center; overflow: auto; padding: 16px; }
+        .preview-area img, .preview-area svg { max-width: 100%; max-height: 400px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); background: white; }
+        .preview-placeholder { text-align: center; color: var(--text-light); }
+        .message { position: fixed; bottom: 20px; left: 20px; right: 20px; padding: 16px; border-radius: 8px; font-weight: 500; text-align: center; z-index: 1000; transform: translateY(100px); opacity: 0; transition: all 0.3s; }
+        .message.show { transform: translateY(0); opacity: 1; }
+        .message.success { background: var(--success); color: white; }
+        .message.error { background: var(--error); color: white; }
+        .loading { position: fixed; inset: 0; background: rgba(255,255,255,0.9); display: none; align-items: center; justify-content: center; z-index: 2000; flex-direction: column; gap: 16px; }
+        .loading.show { display: flex; }
+        .spinner { width: 40px; height: 40px; border: 4px solid var(--border); border-top-color: var(--primary); border-radius: 50%; animation: spin 1s linear infinite; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .page-list { display: flex; flex-wrap: wrap; gap: 8px; }
+        .page-btn { padding: 8px 16px; border: 1px solid var(--border); border-radius: 6px; background: white; cursor: pointer; font-size: 0.875rem; }
+        .page-btn:hover { border-color: var(--primary); }
+        .page-btn.selected { background: var(--primary); color: white; border-color: var(--primary); }
+        #fileInput { display: none; }
+        @media (max-width: 600px) {
+            .container { padding: 12px; }
+            h1 { font-size: 1.25rem; }
+            .card { padding: 16px; }
+            .drop-zone { padding: 30px 16px; }
+            .options-grid { grid-template-columns: 1fr; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>📐 Draw.io → SVG/PNG 変換</h1>
+        <div class="card">
+            <div class="card-title">1. ファイルを選択</div>
+            <div class="drop-zone" id="dropZone">
+                <div class="drop-zone-icon">📂</div>
+                <div class="drop-zone-text">ファイルをドロップ または クリック</div>
+                <div class="drop-zone-hint">.drawio / .xml / .svg 対応</div>
+            </div>
+            <div class="file-info" id="fileInfo" style="display: none; margin-top: 12px;">
+                <div class="file-icon">📄</div>
+                <div class="file-details">
+                    <div class="file-name" id="fileName"></div>
+                    <div class="file-meta" id="fileMeta"></div>
+                </div>
+            </div>
+        </div>
+        <div class="card" id="pageCard" style="display: none;">
+            <div class="card-title">2. ページ選択</div>
+            <div class="page-list" id="pageList"></div>
+        </div>
+        <div class="card" id="previewCard" style="display: none;">
+            <div class="card-title">プレビュー</div>
+            <div class="preview-area" id="previewArea">
+                <div class="preview-placeholder">
+                    <div style="font-size: 48px; margin-bottom: 8px; opacity: 0.5;">🖼️</div>
+                    <div>プレビューがここに表示されます</div>
+                </div>
+            </div>
+        </div>
+        <div class="card" id="exportCard" style="display: none;">
+            <div class="card-title">3. エクスポート設定</div>
+            <div class="options-grid" style="margin-bottom: 16px;">
+                <div class="option-btn selected" data-format="svg">
+                    <div class="option-icon">🎨</div>
+                    <div class="option-label">SVG</div>
+                    <div class="option-desc">ベクター形式</div>
+                </div>
+                <div class="option-btn" data-format="png">
+                    <div class="option-icon">🖼️</div>
+                    <div class="option-label">PNG</div>
+                    <div class="option-desc">画像形式</div>
+                </div>
+            </div>
+            <div id="pngOptions" style="display: none; margin-bottom: 16px;">
+                <div style="font-size: 0.875rem; color: var(--text-light); margin-bottom: 8px;">解像度スケール</div>
+                <div class="scale-control">
+                    <input type="range" id="scaleSlider" min="1" max="4" value="2">
+                    <span class="scale-value" id="scaleValue">2x</span>
+                </div>
+            </div>
+            <button class="btn btn-success" id="exportBtn">⬇️ ダウンロード</button>
+        </div>
+    </div>
+    <input type="file" id="fileInput" accept="*">
+    <div class="message" id="message"></div>
+    <div class="loading" id="loading">
+        <div class="spinner"></div>
+        <div id="loadingText">処理中...</div>
+    </div>
+
+<script>
+(function() {
+    'use strict';
+
+    // State
+    let currentFile = null;
+    let diagrams = [];
+    let selectedPageIndex = 0;
+    let selectedFormat = 'svg';
+    let pngScale = 2;
+    let currentSvgContent = null;
+
+    // DOM
+    const $ = id => document.getElementById(id);
+    const dropZone = $('dropZone');
+    const fileInput = $('fileInput');
+    const fileInfo = $('fileInfo');
+    const fileName = $('fileName');
+    const fileMeta = $('fileMeta');
+    const pageCard = $('pageCard');
+    const pageList = $('pageList');
+    const previewCard = $('previewCard');
+    const previewArea = $('previewArea');
+    const exportCard = $('exportCard');
+    const pngOptions = $('pngOptions');
+    const scaleSlider = $('scaleSlider');
+    const scaleValue = $('scaleValue');
+    const exportBtn = $('exportBtn');
+    const message = $('message');
+    const loading = $('loading');
+    const loadingText = $('loadingText');
+
+    // Utils
+    function showMessage(text, type = 'success') {
+        message.textContent = text;
+        message.className = `message show ${type}`;
+        setTimeout(() => message.classList.remove('show'), 4000);
+    }
+
+    function showLoading(text = '処理中...') {
+        loadingText.textContent = text;
+        loading.classList.add('show');
+    }
+
+    function hideLoading() {
+        loading.classList.remove('show');
+    }
+
+    function formatBytes(bytes) {
+        if (bytes < 1024) return bytes + ' B';
+        if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+        return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+    }
+
+    // Decoder
+    function decodeDrawioData(data) {
+        if (!data) return null;
+        data = data.trim();
+        if (data.startsWith('<')) return data;
+
+        const strategies = [
+            () => { const b = atob(data); const u = Uint8Array.from(b, c => c.charCodeAt(0)); return decodeURIComponent(new TextDecoder().decode(pako.inflateRaw(u))); },
+            () => { const b = atob(data); const u = Uint8Array.from(b, c => c.charCodeAt(0)); return decodeURIComponent(new TextDecoder().decode(pako.inflate(u))); },
+            () => { const b = atob(data); const u = Uint8Array.from(b, c => c.charCodeAt(0)); return new TextDecoder().decode(pako.inflateRaw(u)); },
+            () => { const b = atob(data); const u = Uint8Array.from(b, c => c.charCodeAt(0)); return new TextDecoder().decode(pako.inflate(u)); },
+            () => decodeURIComponent(atob(data)),
+            () => atob(data)
+        ];
+
+        for (const strategy of strategies) {
+            try {
+                const result = strategy();
+                if (result && (result.includes('mxGraphModel') || result.includes('mxCell'))) return result;
+            } catch (e) {}
+        }
+        return null;
+    }
+
+    // Parser
+    function parseDrawioFile(content, filename) {
+        content = content.replace(/^\uFEFF/, '').trim();
+        const mxMatch = content.match(/<mxfile[\s\S]*<\/mxfile>/i);
+        if (mxMatch) content = mxMatch[0];
+
+        const parser = new DOMParser();
+        let doc = parser.parseFromString(content, 'text/xml');
+
+        if (doc.querySelector('parsererror')) {
+            doc = parser.parseFromString(content, 'text/html');
+        }
+
+        const results = [];
+        const mxfile = doc.querySelector('mxfile');
+
+        if (mxfile) {
+            const diagramEls = mxfile.querySelectorAll('diagram');
+            for (let i = 0; i < diagramEls.length; i++) {
+                const diag = diagramEls[i];
+                const name = diag.getAttribute('name') || `ページ ${i + 1}`;
+                let model = diag.querySelector('mxGraphModel');
+
+                if (!model) {
+                    const compressed = diag.textContent.trim();
+                    if (compressed && !compressed.startsWith('<')) {
+                        const decoded = decodeDrawioData(compressed);
+                        if (decoded) {
+                            const innerDoc = parser.parseFromString(decoded, 'text/xml');
+                            if (!innerDoc.querySelector('parsererror')) {
+                                model = innerDoc.querySelector('mxGraphModel');
+                            }
+                        }
+                    }
+                }
+
+                if (model) results.push({ name, model, index: i });
+            }
+        } else {
+            const model = doc.querySelector('mxGraphModel');
+            if (model) results.push({ name: filename.replace(/\.(drawio|xml)$/i, ''), model, index: 0 });
+        }
+
+        if (results.length === 0) throw new Error('ダイアグラムが見つかりません');
+        return results;
+    }
+
+    // Style parser
+    function parseStyle(str) {
+        const s = {};
+        if (!str) return s;
+        str.split(';').forEach(part => {
+            const idx = part.indexOf('=');
+            if (idx > 0) {
+                s[part.substring(0, idx).trim()] = part.substring(idx + 1).trim();
+            } else if (part.trim()) {
+                s[part.trim()] = true;
+            }
+        });
+        return s;
+    }
+
+    function decodeHtml(text) {
+        if (!text) return '';
+        const ta = document.createElement('textarea');
+        ta.innerHTML = text;
+        return ta.value;
+    }
+
+    function escapeXml(str) {
+        return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
+
+    function getColor(c, def) {
+        if (!c || c === 'none' || c === 'default') return def;
+        return c;
+    }
+
+    // SVG Renderer
+    function renderToSvg(model) {
+        const cells = model.querySelectorAll('mxCell');
+        const shapeMap = {};
+        const shapes = [];
+        const edges = [];
+
+        // First pass: collect all elements
+        cells.forEach(cell => {
+            const id = cell.getAttribute('id');
+            if (id === '0' || id === '1') return;
+
+            const geom = cell.querySelector('mxGeometry');
+            const styleStr = cell.getAttribute('style') || '';
+            const style = parseStyle(styleStr);
+            const value = cell.getAttribute('value') || '';
+            const parent = cell.getAttribute('parent');
+            const source = cell.getAttribute('source');
+            const target = cell.getAttribute('target');
+
+            // Determine if edge: edge="1" attribute OR has both source and target
+            const isEdge = cell.getAttribute('edge') === '1' || (source && target);
+
+            let x = 0, y = 0, w = 0, h = 0;
+            let points = [];
+
+            if (geom) {
+                x = parseFloat(geom.getAttribute('x')) || 0;
+                y = parseFloat(geom.getAttribute('y')) || 0;
+                w = parseFloat(geom.getAttribute('width')) || 0;
+                h = parseFloat(geom.getAttribute('height')) || 0;
+
+                // Collect points for edges
+                geom.querySelectorAll(':scope > mxPoint').forEach(pt => {
+                    const px = parseFloat(pt.getAttribute('x'));
+                    const py = parseFloat(pt.getAttribute('y'));
+                    const as = pt.getAttribute('as');
+                    if (!isNaN(px) && !isNaN(py)) {
+                        points.push({ x: px, y: py, as });
+                    }
+                });
+
+                // Collect points from Array
+                geom.querySelectorAll('Array[as="points"] > mxPoint').forEach(pt => {
+                    const px = parseFloat(pt.getAttribute('x'));
+                    const py = parseFloat(pt.getAttribute('y'));
+                    if (!isNaN(px) && !isNaN(py)) {
+                        points.push({ x: px, y: py, as: 'waypoint' });
+                    }
+                });
+            }
+
+            const elem = {
+                id, parent, x, y, w, h, style, styleStr, value,
+                source, target, points, isEdge
+            };
+
+            if (id) shapeMap[id] = elem;
+
+            if (isEdge) {
+                edges.push(elem);
+            } else if (w > 0 || h > 0) {
+                shapes.push(elem);
+            }
+        });
+
+        // Calculate absolute positions for shapes
+        function getAbsolutePosition(elem) {
+            let absX = elem.x, absY = elem.y;
+            let parentId = elem.parent;
+            while (parentId && parentId !== '0' && parentId !== '1') {
+                const parentElem = shapeMap[parentId];
+                if (parentElem && !parentElem.isEdge) {
+                    absX += parentElem.x;
+                    absY += parentElem.y;
+                    parentId = parentElem.parent;
+                } else {
+                    break;
+                }
+            }
+            return { x: absX, y: absY };
+        }
+
+        shapes.forEach(elem => {
+            const pos = getAbsolutePosition(elem);
+            elem.absX = pos.x;
+            elem.absY = pos.y;
+        });
+
+        // Calculate bounds
+        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+
+        shapes.forEach(elem => {
+            minX = Math.min(minX, elem.absX);
+            minY = Math.min(minY, elem.absY);
+            maxX = Math.max(maxX, elem.absX + elem.w);
+            maxY = Math.max(maxY, elem.absY + elem.h);
+        });
+
+        edges.forEach(elem => {
+            elem.points.forEach(p => {
+                if (p.as !== 'offset') {
+                    minX = Math.min(minX, p.x);
+                    minY = Math.min(minY, p.y);
+                    maxX = Math.max(maxX, p.x);
+                    maxY = Math.max(maxY, p.y);
+                }
+            });
+        });
+
+        if (minX === Infinity) { minX = 0; minY = 0; maxX = 400; maxY = 300; }
+
+        const pad = 50;
+        const width = Math.max(100, (maxX - minX) + pad * 2);
+        const height = Math.max(100, (maxY - minY) + pad * 2);
+        const ox = pad - minX;
+        const oy = pad - minY;
+
+        let svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">`;
+        svg += `<defs>`;
+        svg += `<marker id="arrowEnd" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto"><path d="M0,0 L0,12 L12,6 Z" fill="#000"/></marker>`;
+        svg += `<marker id="arrowStart" markerWidth="12" markerHeight="12" refX="2" refY="6" orient="auto"><path d="M12,0 L12,12 L0,6 Z" fill="#000"/></marker>`;
+        svg += `</defs>`;
+        svg += `<rect width="100%" height="100%" fill="white"/>`;
+        svg += `<g transform="translate(${ox},${oy})">`;
+
+        // Render shapes first
+        shapes.forEach(elem => {
+            svg += renderShape(elem);
+        });
+
+        // Render edges
+        edges.forEach(elem => {
+            svg += renderEdge(elem, shapeMap);
+        });
+
+        svg += '</g></svg>';
+        return { svg, width, height };
+    }
+
+    function renderShape(elem) {
+        const fill = getColor(elem.style.fillColor, '#ffffff');
+        const stroke = getColor(elem.style.strokeColor, '#000000');
+        const sw = parseFloat(elem.style.strokeWidth) || 1;
+        const rounded = elem.style.rounded === '1';
+        const opacity = elem.style.opacity || '1';
+        const w = elem.w, h = elem.h;
+        const x = elem.absX;
+        const y = elem.absY;
+        const rx = rounded ? Math.min(5, w / 4, h / 4) : 0;
+
+        let svg = `<g transform="translate(${x},${y})" opacity="${opacity}">`;
+
+        const styleStr = elem.styleStr || '';
+        const shape = elem.style.shape || '';
+
+        // Cylinder detection
+        if (shape === 'cylinder' || shape === 'cylinder3' ||
+            styleStr.includes('shape=cylinder')) {
+            const arcH = Math.min(h * 0.15, 20);
+            svg += `<path d="M0,${arcH} C0,${arcH/2} ${w/4},0 ${w/2},0 C${w*3/4},0 ${w},${arcH/2} ${w},${arcH} L${w},${h-arcH} C${w},${h-arcH/2} ${w*3/4},${h} ${w/2},${h} C${w/4},${h} 0,${h-arcH/2} 0,${h-arcH} Z" fill="${fill}" stroke="${stroke}" stroke-width="${sw}"/>`;
+            svg += `<path d="M0,${arcH} C0,${arcH*1.5} ${w/4},${arcH*2} ${w/2},${arcH*2} C${w*3/4},${arcH*2} ${w},${arcH*1.5} ${w},${arcH}" fill="none" stroke="${stroke}" stroke-width="${sw}"/>`;
+        }
+        // Ellipse/Circle
+        else if (elem.style.ellipse === '1' || shape === 'ellipse' || styleStr.includes('ellipse')) {
+            svg += `<ellipse cx="${w/2}" cy="${h/2}" rx="${w/2}" ry="${h/2}" fill="${fill}" stroke="${stroke}" stroke-width="${sw}"/>`;
+        }
+        // Diamond/Rhombus
+        else if (elem.style.rhombus === '1' || shape === 'rhombus' || styleStr.includes('rhombus')) {
+            svg += `<polygon points="${w/2},0 ${w},${h/2} ${w/2},${h} 0,${h/2}" fill="${fill}" stroke="${stroke}" stroke-width="${sw}"/>`;
+        }
+        // Triangle
+        else if (shape === 'triangle' || styleStr.includes('triangle')) {
+            svg += `<polygon points="${w/2},0 ${w},${h} 0,${h}" fill="${fill}" stroke="${stroke}" stroke-width="${sw}"/>`;
+        }
+        // Hexagon
+        else if (shape === 'hexagon' || styleStr.includes('hexagon')) {
+            const inset = w * 0.25;
+            svg += `<polygon points="${inset},0 ${w-inset},0 ${w},${h/2} ${w-inset},${h} ${inset},${h} 0,${h/2}" fill="${fill}" stroke="${stroke}" stroke-width="${sw}"/>`;
+        }
+        // Cloud
+        else if (shape === 'cloud' || styleStr.includes('cloud')) {
+            svg += `<path d="M${w*0.25},${h*0.8} C${w*0.05},${h*0.8} 0,${h*0.6} ${w*0.1},${h*0.45} C${w*0.05},${h*0.3} ${w*0.15},${h*0.15} ${w*0.3},${h*0.2} C${w*0.35},${h*0.05} ${w*0.5},0 ${w*0.65},${h*0.1} C${w*0.8},0 ${w*0.95},${h*0.15} ${w*0.9},${h*0.35} C${w},${h*0.45} ${w},${h*0.65} ${w*0.85},${h*0.75} C${w*0.9},${h*0.9} ${w*0.75},${h} ${w*0.6},${h*0.95} C${w*0.5},${h} ${w*0.35},${h} ${w*0.25},${h*0.8} Z" fill="${fill}" stroke="${stroke}" stroke-width="${sw}"/>`;
+        }
+        // Parallelogram
+        else if (shape === 'parallelogram' || styleStr.includes('parallelogram')) {
+            const skew = w * 0.2;
+            svg += `<polygon points="${skew},0 ${w},0 ${w-skew},${h} 0,${h}" fill="${fill}" stroke="${stroke}" stroke-width="${sw}"/>`;
+        }
+        // Actor (stick figure)
+        else if (shape === 'actor' || shape === 'umlActor' || styleStr.includes('shape=actor') || styleStr.includes('shape=umlActor')) {
+            const headR = Math.min(w, h) * 0.15;
+            const centerX = w / 2;
+            svg += `<circle cx="${centerX}" cy="${headR}" r="${headR}" fill="${fill}" stroke="${stroke}" stroke-width="${sw}"/>`;
+            svg += `<line x1="${centerX}" y1="${headR*2}" x2="${centerX}" y2="${h*0.6}" stroke="${stroke}" stroke-width="${sw}"/>`;
+            svg += `<line x1="0" y1="${h*0.35}" x2="${w}" y2="${h*0.35}" stroke="${stroke}" stroke-width="${sw}"/>`;
+            svg += `<line x1="${centerX}" y1="${h*0.6}" x2="0" y2="${h}" stroke="${stroke}" stroke-width="${sw}"/>`;
+            svg += `<line x1="${centerX}" y1="${h*0.6}" x2="${w}" y2="${h}" stroke="${stroke}" stroke-width="${sw}"/>`;
+        }
+        // Document
+        else if (shape === 'document' || styleStr.includes('shape=document')) {
+            const wave = h * 0.1;
+            svg += `<path d="M0,0 L${w},0 L${w},${h-wave} Q${w*0.75},${h} ${w/2},${h-wave} Q${w*0.25},${h-wave*2} 0,${h-wave} Z" fill="${fill}" stroke="${stroke}" stroke-width="${sw}"/>`;
+        }
+        // Note
+        else if (shape === 'note' || styleStr.includes('shape=note')) {
+            const fold = Math.min(w, h) * 0.2;
+            svg += `<polygon points="0,0 ${w-fold},0 ${w},${fold} ${w},${h} 0,${h}" fill="${fill}" stroke="${stroke}" stroke-width="${sw}"/>`;
+            svg += `<polyline points="${w-fold},0 ${w-fold},${fold} ${w},${fold}" fill="none" stroke="${stroke}" stroke-width="${sw}"/>`;
+        }
+        // Default: Rectangle
+        else {
+            svg += `<rect width="${w}" height="${h}" rx="${rx}" fill="${fill}" stroke="${stroke}" stroke-width="${sw}"/>`;
+        }
+
+        // Text rendering
+        if (elem.value) {
+            const text = decodeHtml(elem.value).replace(/<br\s*\/?>/gi, '\n').replace(/<[^>]+>/g, '');
+            if (text.trim()) {
+                const fs = parseFloat(elem.style.fontSize) || 12;
+                const fc = getColor(elem.style.fontColor, '#000000');
+                const fontWeight = elem.style.fontStyle === '1' || elem.style.bold === '1' ? 'bold' : 'normal';
+                const lines = text.split('\n').filter(l => l.trim());
+                const lh = fs * 1.3;
+                const startY = (h - lines.length * lh) / 2 + fs;
+
+                lines.forEach((line, i) => {
+                    svg += `<text x="${w/2}" y="${startY + i*lh}" text-anchor="middle" font-family="sans-serif" font-size="${fs}" fill="${fc}" font-weight="${fontWeight}">${escapeXml(line.trim())}</text>`;
+                });
+            }
+        }
+
+        svg += '</g>';
+        return svg;
+    }
+
+    function renderEdge(elem, shapeMap) {
+        const stroke = getColor(elem.style.strokeColor, '#000000');
+        const sw = parseFloat(elem.style.strokeWidth) || 1;
+        const dashed = elem.style.dashed === '1' ? 'stroke-dasharray="5,3"' : '';
+
+        const srcShape = elem.source ? shapeMap[elem.source] : null;
+        const tgtShape = elem.target ? shapeMap[elem.target] : null;
+
+        // Get shape absolute position and dimensions
+        function getShapeBounds(shape) {
+            if (!shape) return null;
+            const x = shape.absX !== undefined ? shape.absX : shape.x;
+            const y = shape.absY !== undefined ? shape.absY : shape.y;
+            const w = shape.w || 0;
+            const h = shape.h || 0;
+            return { x, y, w, h, cx: x + w/2, cy: y + h/2 };
+        }
+
+        // Get connection point using relative position (0-1) on shape
+        function getRelativePoint(shape, relX, relY) {
+            const b = getShapeBounds(shape);
+            if (!b) return null;
+            const rx = relX !== undefined ? parseFloat(relX) : 0.5;
+            const ry = relY !== undefined ? parseFloat(relY) : 0.5;
+            return { x: b.x + b.w * rx, y: b.y + b.h * ry };
+        }
+
+        // Get orthogonal connection point: project waypoint to shape edge orthogonally
+        function getOrthogonalConnectionPoint(shape, waypointX, waypointY) {
+            const b = getShapeBounds(shape);
+            if (!b) return null;
+
+            // Determine if waypoint is more horizontal or vertical from shape center
+            const dx = waypointX - b.cx;
+            const dy = waypointY - b.cy;
+
+            // Check which edge is closest for orthogonal connection
+            const distToLeft = Math.abs(waypointX - b.x);
+            const distToRight = Math.abs(waypointX - (b.x + b.w));
+            const distToTop = Math.abs(waypointY - b.y);
+            const distToBottom = Math.abs(waypointY - (b.y + b.h));
+
+            // If waypoint is within shape's horizontal span, connect vertically
+            if (waypointX >= b.x && waypointX <= b.x + b.w) {
+                if (waypointY < b.cy) {
+                    return { x: waypointX, y: b.y }; // Top edge
+                } else {
+                    return { x: waypointX, y: b.y + b.h }; // Bottom edge
+                }
+            }
+            // If waypoint is within shape's vertical span, connect horizontally
+            if (waypointY >= b.y && waypointY <= b.y + b.h) {
+                if (waypointX < b.cx) {
+                    return { x: b.x, y: waypointY }; // Left edge
+                } else {
+                    return { x: b.x + b.w, y: waypointY }; // Right edge
+                }
+            }
+
+            // Waypoint is diagonal from shape - choose closest edge
+            const minHDist = Math.min(distToLeft, distToRight);
+            const minVDist = Math.min(distToTop, distToBottom);
+
+            if (minHDist < minVDist) {
+                // Connect horizontally
+                const edgeX = distToLeft < distToRight ? b.x : b.x + b.w;
+                const edgeY = Math.max(b.y, Math.min(b.y + b.h, waypointY));
+                return { x: edgeX, y: edgeY };
+            } else {
+                // Connect vertically
+                const edgeY = distToTop < distToBottom ? b.y : b.y + b.h;
+                const edgeX = Math.max(b.x, Math.min(b.x + b.w, waypointX));
+                return { x: edgeX, y: edgeY };
+            }
+        }
+
+        // Calculate edge intersection point from center towards target (for non-orthogonal)
+        function getEdgeIntersection(shape, targetX, targetY) {
+            const b = getShapeBounds(shape);
+            if (!b || b.w === 0 || b.h === 0) return { x: b ? b.cx : 0, y: b ? b.cy : 0 };
+
+            const dx = targetX - b.cx;
+            const dy = targetY - b.cy;
+            if (dx === 0 && dy === 0) return { x: b.cx, y: b.cy };
+
+            const hw = b.w / 2, hh = b.h / 2;
+            const absDx = Math.abs(dx), absDy = Math.abs(dy);
+
+            let t;
+            if (absDx * hh > absDy * hw && absDx > 0) {
+                t = hw / absDx;
+            } else if (absDy > 0) {
+                t = hh / absDy;
+            } else {
+                t = 1;
+            }
+
+            return { x: b.cx + dx * t, y: b.cy + dy * t };
+        }
+
+        // Collect points in order
+        let pts = [];
+
+        // Find explicit points
+        const srcPt = elem.points.find(p => p.as === 'sourcePoint');
+        const tgtPt = elem.points.find(p => p.as === 'targetPoint');
+
+        // Collect waypoints (points without 'as' or with 'as=waypoint')
+        const waypoints = elem.points.filter(p => {
+            if (!p.as) return true;
+            if (p.as === 'waypoint' || p.as === 'points') return true;
+            return false;
+        }).filter(p => !isNaN(p.x) && !isNaN(p.y));
+
+        // Check if this is an orthogonal edge
+        const isOrthogonal = elem.styleStr.includes('edgeStyle=orthogonalEdgeStyle') ||
+                            elem.styleStr.includes('edgeStyle=elbowEdgeStyle') ||
+                            elem.style.edgeStyle === 'orthogonalEdgeStyle' ||
+                            waypoints.length > 0; // Assume orthogonal if has waypoints
+
+        // === DETERMINE START POINT ===
+        let startPt = null;
+
+        // Priority 1: Explicit sourcePoint
+        if (srcPt && !isNaN(srcPt.x) && !isNaN(srcPt.y)) {
+            startPt = { x: srcPt.x, y: srcPt.y };
+        }
+        // Priority 2: exitX/exitY style on source shape
+        else if (srcShape && (elem.style.exitX !== undefined || elem.style.exitY !== undefined)) {
+            startPt = getRelativePoint(srcShape, elem.style.exitX, elem.style.exitY);
+        }
+        // Priority 3: Calculate from source shape
+        else if (srcShape) {
+            if (isOrthogonal && waypoints.length > 0) {
+                // For orthogonal edges, connect orthogonally to first waypoint
+                startPt = getOrthogonalConnectionPoint(srcShape, waypoints[0].x, waypoints[0].y);
+            } else if (tgtShape) {
+                const tgtBounds = getShapeBounds(tgtShape);
+                startPt = getEdgeIntersection(srcShape, tgtBounds.cx, tgtBounds.cy);
+            } else if (tgtPt) {
+                startPt = getEdgeIntersection(srcShape, tgtPt.x, tgtPt.y);
+            } else {
+                const srcBounds = getShapeBounds(srcShape);
+                startPt = { x: srcBounds.cx, y: srcBounds.y + srcBounds.h };
+            }
+        }
+
+        if (startPt) pts.push(startPt);
+
+        // === ADD WAYPOINTS ===
+        waypoints.forEach(p => {
+            pts.push({ x: p.x, y: p.y });
+        });
+
+        // === DETERMINE END POINT ===
+        let endPt = null;
+
+        // Priority 1: Explicit targetPoint
+        if (tgtPt && !isNaN(tgtPt.x) && !isNaN(tgtPt.y)) {
+            endPt = { x: tgtPt.x, y: tgtPt.y };
+        }
+        // Priority 2: entryX/entryY style on target shape
+        else if (tgtShape && (elem.style.entryX !== undefined || elem.style.entryY !== undefined)) {
+            endPt = getRelativePoint(tgtShape, elem.style.entryX, elem.style.entryY);
+        }
+        // Priority 3: Calculate from target shape
+        else if (tgtShape) {
+            if (isOrthogonal && waypoints.length > 0) {
+                // For orthogonal edges, connect orthogonally to last waypoint
+                const lastWp = waypoints[waypoints.length - 1];
+                endPt = getOrthogonalConnectionPoint(tgtShape, lastWp.x, lastWp.y);
+            } else if (srcShape) {
+                const srcBounds = getShapeBounds(srcShape);
+                endPt = getEdgeIntersection(tgtShape, srcBounds.cx, srcBounds.cy);
+            } else if (startPt) {
+                endPt = getEdgeIntersection(tgtShape, startPt.x, startPt.y);
+            } else {
+                const tgtBounds = getShapeBounds(tgtShape);
+                endPt = { x: tgtBounds.cx, y: tgtBounds.y };
+            }
+        }
+
+        if (endPt) pts.push(endPt);
+
+        // === FALLBACK: Use all available points ===
+        if (pts.length < 2) {
+            const allPts = elem.points.filter(p => p.as !== 'offset' && !isNaN(p.x) && !isNaN(p.y));
+            if (allPts.length >= 2) {
+                pts = allPts.map(p => ({ x: p.x, y: p.y }));
+            }
+        }
+
+        // Cannot draw with less than 2 points
+        if (pts.length < 2) return '';
+
+        // Remove consecutive duplicates
+        pts = pts.filter((p, i) => i === 0 || Math.abs(p.x - pts[i-1].x) > 0.5 || Math.abs(p.y - pts[i-1].y) > 0.5);
+        if (pts.length < 2) return '';
+
+        // Build SVG path
+        let d = `M${pts[0].x.toFixed(1)},${pts[0].y.toFixed(1)}`;
+        for (let i = 1; i < pts.length; i++) {
+            d += ` L${pts[i].x.toFixed(1)},${pts[i].y.toFixed(1)}`;
+        }
+
+        let svg = '';
+        const markerId = `m_${elem.id || Math.random().toString(36).substr(2, 6)}`;
+
+        // Arrow markers
+        const endArrow = elem.style.endArrow;
+        const startArrow = elem.style.startArrow;
+        const hasEndArrow = endArrow && endArrow !== 'none' && endArrow !== '0';
+        const hasStartArrow = startArrow && startArrow !== 'none' && startArrow !== '0';
+
+        if (hasEndArrow || hasStartArrow) {
+            svg += '<defs>';
+            if (hasEndArrow) {
+                svg += `<marker id="${markerId}_e" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto">`;
+                svg += endArrow === 'open'
+                    ? `<path d="M0,0 L10,5 L0,10" fill="none" stroke="${stroke}" stroke-width="1"/>`
+                    : `<path d="M0,0 L0,10 L10,5 Z" fill="${stroke}"/>`;
+                svg += '</marker>';
+            }
+            if (hasStartArrow) {
+                svg += `<marker id="${markerId}_s" markerWidth="10" markerHeight="10" refX="1" refY="5" orient="auto">`;
+                svg += startArrow === 'open'
+                    ? `<path d="M10,0 L0,5 L10,10" fill="none" stroke="${stroke}" stroke-width="1"/>`
+                    : `<path d="M10,0 L10,10 L0,5 Z" fill="${stroke}"/>`;
+                svg += '</marker>';
+            }
+            svg += '</defs>';
+        }
+
+        let markers = '';
+        if (hasEndArrow) markers += ` marker-end="url(#${markerId}_e)"`;
+        if (hasStartArrow) markers += ` marker-start="url(#${markerId}_s)"`;
+
+        svg += `<path d="${d}" fill="none" stroke="${stroke}" stroke-width="${sw}" ${dashed}${markers}/>`;
+
+        // Edge label
+        if (elem.value) {
+            const text = decodeHtml(elem.value).replace(/<[^>]+>/g, '').trim();
+            if (text) {
+                const midIdx = Math.floor(pts.length / 2);
+                const p1 = pts[Math.max(0, midIdx - 1)];
+                const p2 = pts[Math.min(pts.length - 1, midIdx)];
+                const midX = (p1.x + p2.x) / 2;
+                const midY = (p1.y + p2.y) / 2;
+                const fs = parseFloat(elem.style.fontSize) || 11;
+                const fc = getColor(elem.style.fontColor, '#000000');
+
+                svg += `<rect x="${midX - text.length * fs * 0.3}" y="${midY - fs}" width="${text.length * fs * 0.6}" height="${fs + 4}" fill="white" opacity="0.9"/>`;
+                svg += `<text x="${midX}" y="${midY}" text-anchor="middle" font-family="sans-serif" font-size="${fs}" fill="${fc}">${escapeXml(text)}</text>`;
+            }
+        }
+
+        return svg;
+    }
+
+    // File handling
+    async function handleFile(file) {
+        currentFile = file;
+        showLoading('ファイルを読み込み中...');
+
+        try {
+            const content = await file.text();
+
+            if (file.name.toLowerCase().endsWith('.svg')) {
+                currentSvgContent = content;
+                diagrams = [{ name: file.name.replace(/\.svg$/i, ''), svg: content }];
+            } else {
+                diagrams = parseDrawioFile(content, file.name);
+            }
+
+            fileName.textContent = file.name;
+            fileMeta.textContent = `${formatBytes(file.size)} · ${diagrams.length} ページ`;
+            dropZone.style.display = 'none';
+            fileInfo.style.display = 'flex';
+
+            if (diagrams.length > 1) {
+                pageList.innerHTML = '';
+                diagrams.forEach((d, i) => {
+                    const btn = document.createElement('button');
+                    btn.className = 'page-btn' + (i === 0 ? ' selected' : '');
+                    btn.textContent = d.name;
+                    btn.onclick = () => selectPage(i);
+                    pageList.appendChild(btn);
+                });
+                pageCard.style.display = 'block';
+            } else {
+                pageCard.style.display = 'none';
+            }
+
+            selectPage(0);
+            previewCard.style.display = 'block';
+            exportCard.style.display = 'block';
+            hideLoading();
+            showMessage('ファイルを読み込みました');
+
+        } catch (err) {
+            hideLoading();
+            console.error(err);
+            previewCard.style.display = 'block';
+            previewArea.innerHTML = `<div style="color:#ef4444;padding:16px;"><strong>エラー:</strong> ${err.message}</div>`;
+            showMessage(err.message, 'error');
+        }
+    }
+
+    function selectPage(index) {
+        selectedPageIndex = index;
+        pageList.querySelectorAll('.page-btn').forEach((btn, i) => btn.classList.toggle('selected', i === index));
+
+        const page = diagrams[index];
+        if (page.svg) {
+            currentSvgContent = page.svg;
+        } else if (page.model) {
+            const result = renderToSvg(page.model);
+            currentSvgContent = result.svg;
+        }
+
+        const blob = new Blob([currentSvgContent], { type: 'image/svg+xml' });
+        const url = URL.createObjectURL(blob);
+        previewArea.innerHTML = `<img src="${url}" alt="Preview">`;
+    }
+
+    function exportFile() {
+        if (!currentSvgContent) return;
+        const baseName = currentFile.name.replace(/\.(drawio|xml|svg)$/i, '');
+
+        if (selectedFormat === 'svg') {
+            downloadBlob(new Blob([currentSvgContent], { type: 'image/svg+xml' }), `${baseName}.svg`);
+        } else {
+            exportAsPng(baseName);
+        }
+    }
+
+    function exportAsPng(baseName) {
+        showLoading('PNG生成中...');
+        const blob = new Blob([currentSvgContent], { type: 'image/svg+xml' });
+        const url = URL.createObjectURL(blob);
+        const img = new Image();
+
+        img.onload = () => {
+            const canvas = document.createElement('canvas');
+            canvas.width = img.width * pngScale;
+            canvas.height = img.height * pngScale;
+            const ctx = canvas.getContext('2d');
+            ctx.fillStyle = 'white';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+
+            canvas.toBlob(pngBlob => {
+                downloadBlob(pngBlob, `${baseName}.png`);
+                URL.revokeObjectURL(url);
+                hideLoading();
+            }, 'image/png');
+        };
+
+        img.onerror = () => {
+            URL.revokeObjectURL(url);
+            hideLoading();
+            showMessage('PNG生成に失敗しました', 'error');
+        };
+
+        img.src = url;
+    }
+
+    function downloadBlob(blob, filename) {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        showMessage(`${filename} をダウンロード`);
+    }
+
+    // Event handlers
+    dropZone.onclick = () => fileInput.click();
+    fileInput.onchange = e => { if (e.target.files[0]) handleFile(e.target.files[0]); e.target.value = ''; };
+
+    // Global drag & drop
+    document.addEventListener('dragover', e => { e.preventDefault(); e.stopPropagation(); dropZone.classList.add('active'); }, false);
+    document.addEventListener('dragleave', e => { e.preventDefault(); e.stopPropagation(); dropZone.classList.remove('active'); }, false);
+    document.addEventListener('drop', e => {
+        e.preventDefault();
+        e.stopPropagation();
+        dropZone.classList.remove('active');
+        const file = e.dataTransfer.files[0];
+        if (file) {
+            dropZone.style.display = 'block';
+            fileInfo.style.display = 'none';
+            handleFile(file);
+        }
+    }, false);
+    window.addEventListener('dragenter', e => e.preventDefault(), false);
+
+    document.querySelectorAll('.option-btn').forEach(btn => {
+        btn.onclick = () => {
+            document.querySelectorAll('.option-btn').forEach(b => b.classList.remove('selected'));
+            btn.classList.add('selected');
+            selectedFormat = btn.dataset.format;
+            pngOptions.style.display = selectedFormat === 'png' ? 'block' : 'none';
+        };
+    });
+
+    scaleSlider.oninput = () => { pngScale = parseInt(scaleSlider.value); scaleValue.textContent = `${pngScale}x`; };
+    exportBtn.onclick = exportFile;
+    fileInfo.onclick = () => { dropZone.style.display = 'block'; fileInfo.style.display = 'none'; fileInput.click(); };
+
+})();
+</script>
+</body>
+</html>
