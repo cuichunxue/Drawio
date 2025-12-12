@@ -542,6 +542,8 @@
         const stroke = getColor(elem.style.strokeColor, '#000000');
         const sw = parseFloat(elem.style.strokeWidth) || 1;
         const dashed = elem.style.dashed === '1' ? 'stroke-dasharray="5,3"' : '';
+        const rounded = elem.style.rounded === '1';
+        const curved = elem.style.curved === '1';
 
         const srcShape = elem.source ? shapeMap[elem.source] : null;
         const tgtShape = elem.target ? shapeMap[elem.target] : null;
@@ -556,7 +558,7 @@
             return { x, y, w, h, cx: x + w/2, cy: y + h/2 };
         }
 
-        // Get connection point using relative position (0-1) on shape
+        // Get connection point using relative position (0-1) on shape boundary
         function getRelativePoint(shape, relX, relY) {
             const b = getShapeBounds(shape);
             if (!b) return null;
@@ -565,56 +567,163 @@
             return { x: b.x + b.w * rx, y: b.y + b.h * ry };
         }
 
-        // Get orthogonal connection point: project waypoint to shape edge orthogonally
-        function getOrthogonalConnectionPoint(shape, waypointX, waypointY) {
-            const b = getShapeBounds(shape);
-            if (!b) return null;
+        // Determine side from relative coordinates (more precise)
+        function getSide(relX, relY) {
+            const rx = relX !== undefined ? parseFloat(relX) : 0.5;
+            const ry = relY !== undefined ? parseFloat(relY) : 0.5;
 
-            // Determine if waypoint is more horizontal or vertical from shape center
-            const dx = waypointX - b.cx;
-            const dy = waypointY - b.cy;
+            // Check corners and edges precisely
+            if (ry <= 0.01) return 'top';
+            if (ry >= 0.99) return 'bottom';
+            if (rx <= 0.01) return 'left';
+            if (rx >= 0.99) return 'right';
 
-            // Check which edge is closest for orthogonal connection
-            const distToLeft = Math.abs(waypointX - b.x);
-            const distToRight = Math.abs(waypointX - (b.x + b.w));
-            const distToTop = Math.abs(waypointY - b.y);
-            const distToBottom = Math.abs(waypointY - (b.y + b.h));
+            // For intermediate positions, determine dominant direction
+            const distTop = ry;
+            const distBottom = 1 - ry;
+            const distLeft = rx;
+            const distRight = 1 - rx;
+            const minDist = Math.min(distTop, distBottom, distLeft, distRight);
 
-            // If waypoint is within shape's horizontal span, connect vertically
-            if (waypointX >= b.x && waypointX <= b.x + b.w) {
-                if (waypointY < b.cy) {
-                    return { x: waypointX, y: b.y }; // Top edge
-                } else {
-                    return { x: waypointX, y: b.y + b.h }; // Bottom edge
-                }
-            }
-            // If waypoint is within shape's vertical span, connect horizontally
-            if (waypointY >= b.y && waypointY <= b.y + b.h) {
-                if (waypointX < b.cx) {
-                    return { x: b.x, y: waypointY }; // Left edge
-                } else {
-                    return { x: b.x + b.w, y: waypointY }; // Right edge
-                }
-            }
+            if (minDist === distTop) return 'top';
+            if (minDist === distBottom) return 'bottom';
+            if (minDist === distLeft) return 'left';
+            return 'right';
+        }
 
-            // Waypoint is diagonal from shape - choose closest edge
-            const minHDist = Math.min(distToLeft, distToRight);
-            const minVDist = Math.min(distToTop, distToBottom);
-
-            if (minHDist < minVDist) {
-                // Connect horizontally
-                const edgeX = distToLeft < distToRight ? b.x : b.x + b.w;
-                const edgeY = Math.max(b.y, Math.min(b.y + b.h, waypointY));
-                return { x: edgeX, y: edgeY };
-            } else {
-                // Connect vertically
-                const edgeY = distToTop < distToBottom ? b.y : b.y + b.h;
-                const edgeX = Math.max(b.x, Math.min(b.x + b.w, waypointX));
-                return { x: edgeX, y: edgeY };
+        // Get direction vector for a side
+        function getSideDirection(side) {
+            switch(side) {
+                case 'top': return { dx: 0, dy: -1 };
+                case 'bottom': return { dx: 0, dy: 1 };
+                case 'left': return { dx: -1, dy: 0 };
+                case 'right': return { dx: 1, dy: 0 };
+                default: return { dx: 0, dy: 1 };
             }
         }
 
-        // Calculate edge intersection point from center towards target (for non-orthogonal)
+        // Advanced orthogonal path generation
+        function generateOrthogonalPath(start, end, startSide, endSide, srcBounds, tgtBounds) {
+            const pts = [start];
+            const jetty = parseFloat(elem.style.jettySize) || 20;
+
+            const startDir = getSideDirection(startSide);
+            const endDir = getSideDirection(endSide);
+
+            // Calculate jet points (initial perpendicular segment)
+            const jetStart = {
+                x: start.x + startDir.dx * jetty,
+                y: start.y + startDir.dy * jetty
+            };
+            const jetEnd = {
+                x: end.x + endDir.dx * jetty,
+                y: end.y + endDir.dy * jetty
+            };
+
+            const dx = end.x - start.x;
+            const dy = end.y - start.y;
+            const midX = (start.x + end.x) / 2;
+            const midY = (start.y + end.y) / 2;
+
+            // Determine routing strategy based on sides
+            const isHorizontalStart = (startSide === 'left' || startSide === 'right');
+            const isHorizontalEnd = (endSide === 'left' || endSide === 'right');
+            const isVerticalStart = (startSide === 'top' || startSide === 'bottom');
+            const isVerticalEnd = (endSide === 'top' || endSide === 'bottom');
+
+            // Same side connections (U-shape routing)
+            if (startSide === endSide) {
+                const offset = jetty + 20;
+                if (startSide === 'top') {
+                    const minY = Math.min(start.y, end.y) - offset;
+                    pts.push({ x: start.x, y: minY });
+                    pts.push({ x: end.x, y: minY });
+                } else if (startSide === 'bottom') {
+                    const maxY = Math.max(start.y, end.y) + offset;
+                    pts.push({ x: start.x, y: maxY });
+                    pts.push({ x: end.x, y: maxY });
+                } else if (startSide === 'left') {
+                    const minX = Math.min(start.x, end.x) - offset;
+                    pts.push({ x: minX, y: start.y });
+                    pts.push({ x: minX, y: end.y });
+                } else if (startSide === 'right') {
+                    const maxX = Math.max(start.x, end.x) + offset;
+                    pts.push({ x: maxX, y: start.y });
+                    pts.push({ x: maxX, y: end.y });
+                }
+            }
+            // Opposite sides - simple routing
+            else if ((startSide === 'top' && endSide === 'bottom') ||
+                     (startSide === 'bottom' && endSide === 'top')) {
+                if (Math.abs(dx) > 1) {
+                    pts.push({ x: start.x, y: midY });
+                    pts.push({ x: end.x, y: midY });
+                }
+            }
+            else if ((startSide === 'left' && endSide === 'right') ||
+                     (startSide === 'right' && endSide === 'left')) {
+                if (Math.abs(dy) > 1) {
+                    pts.push({ x: midX, y: start.y });
+                    pts.push({ x: midX, y: end.y });
+                }
+            }
+            // Perpendicular sides (L-shape or S-shape routing)
+            else if (isVerticalStart && isHorizontalEnd) {
+                // Vertical start, horizontal end
+                const goingDown = (startSide === 'bottom');
+                const goingRight = (endSide === 'right');
+
+                // Check if direct L-shape works
+                const directY = end.y;
+                const validDirect = goingDown ? (directY >= start.y) : (directY <= start.y);
+
+                if (validDirect && Math.abs(directY - start.y) > 5) {
+                    // Simple L-shape
+                    pts.push({ x: start.x, y: end.y });
+                } else {
+                    // Need S-shape routing
+                    const offsetY = goingDown ? Math.max(end.y, start.y + jetty) : Math.min(end.y, start.y - jetty);
+                    pts.push({ x: start.x, y: offsetY });
+                    pts.push({ x: end.x + (goingRight ? jetty : -jetty), y: offsetY });
+                    pts.push({ x: end.x + (goingRight ? jetty : -jetty), y: end.y });
+                }
+            }
+            else if (isHorizontalStart && isVerticalEnd) {
+                // Horizontal start, vertical end
+                const goingRight = (startSide === 'right');
+                const goingDown = (endSide === 'bottom');
+
+                // Check if direct L-shape works
+                const directX = end.x;
+                const validDirect = goingRight ? (directX >= start.x) : (directX <= start.x);
+
+                if (validDirect && Math.abs(directX - start.x) > 5) {
+                    // Simple L-shape
+                    pts.push({ x: end.x, y: start.y });
+                } else {
+                    // Need S-shape routing
+                    const offsetX = goingRight ? Math.max(end.x, start.x + jetty) : Math.min(end.x, start.x - jetty);
+                    pts.push({ x: offsetX, y: start.y });
+                    pts.push({ x: offsetX, y: end.y + (goingDown ? jetty : -jetty) });
+                    pts.push({ x: end.x, y: end.y + (goingDown ? jetty : -jetty) });
+                }
+            }
+            // Default routing
+            else {
+                if (Math.abs(dx) >= Math.abs(dy)) {
+                    pts.push({ x: midX, y: start.y });
+                    pts.push({ x: midX, y: end.y });
+                } else {
+                    pts.push({ x: start.x, y: midY });
+                    pts.push({ x: end.x, y: midY });
+                }
+            }
+
+            pts.push(end);
+            return pts;
+        }
+
+        // Calculate edge intersection point from center towards target
         function getEdgeIntersection(shape, targetX, targetY) {
             const b = getShapeBounds(shape);
             if (!b || b.w === 0 || b.h === 0) return { x: b ? b.cx : 0, y: b ? b.cy : 0 };
@@ -638,92 +747,142 @@
             return { x: b.cx + dx * t, y: b.cy + dy * t };
         }
 
-        // Collect points in order
-        let pts = [];
+        // Detect side from intersection point
+        function detectSideFromPoint(bounds, point) {
+            if (!bounds || !point) return 'bottom';
+            const dx = point.x - bounds.cx;
+            const dy = point.y - bounds.cy;
+            const hw = bounds.w / 2;
+            const hh = bounds.h / 2;
 
-        // Find explicit points
-        const srcPt = elem.points.find(p => p.as === 'sourcePoint');
-        const tgtPt = elem.points.find(p => p.as === 'targetPoint');
+            // Normalize to determine dominant direction
+            const normX = hw > 0 ? Math.abs(dx) / hw : 0;
+            const normY = hh > 0 ? Math.abs(dy) / hh : 0;
 
-        // Collect waypoints (points without 'as' or with 'as=waypoint')
-        const waypoints = elem.points.filter(p => {
-            if (!p.as) return true;
-            if (p.as === 'waypoint' || p.as === 'points') return true;
-            return false;
-        }).filter(p => !isNaN(p.x) && !isNaN(p.y));
+            if (normX > normY) {
+                return dx > 0 ? 'right' : 'left';
+            } else {
+                return dy > 0 ? 'bottom' : 'top';
+            }
+        }
 
-        // Check if this is an orthogonal edge
+        // Check edge styles
+        const edgeStyle = elem.style.edgeStyle || '';
         const isOrthogonal = elem.styleStr.includes('edgeStyle=orthogonalEdgeStyle') ||
                             elem.styleStr.includes('edgeStyle=elbowEdgeStyle') ||
-                            elem.style.edgeStyle === 'orthogonalEdgeStyle' ||
-                            waypoints.length > 0; // Assume orthogonal if has waypoints
+                            elem.styleStr.includes('edgeStyle=segmentEdgeStyle') ||
+                            edgeStyle === 'orthogonalEdgeStyle' ||
+                            edgeStyle === 'elbowEdgeStyle' ||
+                            edgeStyle === 'segmentEdgeStyle';
+
+        const isEntityRelation = elem.styleStr.includes('edgeStyle=entityRelationEdgeStyle') ||
+                                 edgeStyle === 'entityRelationEdgeStyle';
+
+        // Collect waypoints from Array
+        const waypoints = elem.points.filter(p => {
+            if (p.as === 'sourcePoint' || p.as === 'targetPoint' || p.as === 'offset') return false;
+            return !isNaN(p.x) && !isNaN(p.y);
+        });
+
+        // Get source bounds
+        const srcBounds = srcShape ? getShapeBounds(srcShape) : null;
+        const tgtBounds = tgtShape ? getShapeBounds(tgtShape) : null;
 
         // === DETERMINE START POINT ===
         let startPt = null;
+        let startSide = 'bottom';
 
-        // Priority 1: Explicit sourcePoint
-        if (srcPt && !isNaN(srcPt.x) && !isNaN(srcPt.y)) {
-            startPt = { x: srcPt.x, y: srcPt.y };
-        }
-        // Priority 2: exitX/exitY style on source shape
-        else if (srcShape && (elem.style.exitX !== undefined || elem.style.exitY !== undefined)) {
+        // Priority 1: exitX/exitY on source shape (most reliable)
+        if (srcShape && (elem.style.exitX !== undefined || elem.style.exitY !== undefined)) {
             startPt = getRelativePoint(srcShape, elem.style.exitX, elem.style.exitY);
+            startSide = getSide(elem.style.exitX, elem.style.exitY);
         }
-        // Priority 3: Calculate from source shape
-        else if (srcShape) {
-            if (isOrthogonal && waypoints.length > 0) {
-                // For orthogonal edges, connect orthogonally to first waypoint
-                startPt = getOrthogonalConnectionPoint(srcShape, waypoints[0].x, waypoints[0].y);
-            } else if (tgtShape) {
-                const tgtBounds = getShapeBounds(tgtShape);
-                startPt = getEdgeIntersection(srcShape, tgtBounds.cx, tgtBounds.cy);
-            } else if (tgtPt) {
-                startPt = getEdgeIntersection(srcShape, tgtPt.x, tgtPt.y);
-            } else {
-                const srcBounds = getShapeBounds(srcShape);
-                startPt = { x: srcBounds.cx, y: srcBounds.y + srcBounds.h };
+        // Priority 2: Explicit sourcePoint
+        else {
+            const srcPtData = elem.points.find(p => p.as === 'sourcePoint');
+            if (srcPtData && !isNaN(srcPtData.x) && !isNaN(srcPtData.y)) {
+                startPt = { x: srcPtData.x, y: srcPtData.y };
+                if (srcBounds) {
+                    startSide = detectSideFromPoint(srcBounds, startPt);
+                }
             }
         }
-
-        if (startPt) pts.push(startPt);
-
-        // === ADD WAYPOINTS ===
-        waypoints.forEach(p => {
-            pts.push({ x: p.x, y: p.y });
-        });
+        // Priority 3: Calculate from source shape
+        if (!startPt && srcShape) {
+            if (tgtBounds) {
+                startPt = getEdgeIntersection(srcShape, tgtBounds.cx, tgtBounds.cy);
+                startSide = detectSideFromPoint(srcBounds, startPt);
+            } else if (waypoints.length > 0) {
+                startPt = getEdgeIntersection(srcShape, waypoints[0].x, waypoints[0].y);
+                startSide = detectSideFromPoint(srcBounds, startPt);
+            } else {
+                startPt = { x: srcBounds.cx, y: srcBounds.y + srcBounds.h };
+                startSide = 'bottom';
+            }
+        }
 
         // === DETERMINE END POINT ===
         let endPt = null;
+        let endSide = 'top';
 
-        // Priority 1: Explicit targetPoint
-        if (tgtPt && !isNaN(tgtPt.x) && !isNaN(tgtPt.y)) {
-            endPt = { x: tgtPt.x, y: tgtPt.y };
-        }
-        // Priority 2: entryX/entryY style on target shape
-        else if (tgtShape && (elem.style.entryX !== undefined || elem.style.entryY !== undefined)) {
+        // Priority 1: entryX/entryY on target shape (most reliable)
+        if (tgtShape && (elem.style.entryX !== undefined || elem.style.entryY !== undefined)) {
             endPt = getRelativePoint(tgtShape, elem.style.entryX, elem.style.entryY);
+            endSide = getSide(elem.style.entryX, elem.style.entryY);
+        }
+        // Priority 2: Explicit targetPoint
+        else {
+            const tgtPtData = elem.points.find(p => p.as === 'targetPoint');
+            if (tgtPtData && !isNaN(tgtPtData.x) && !isNaN(tgtPtData.y)) {
+                endPt = { x: tgtPtData.x, y: tgtPtData.y };
+                if (tgtBounds) {
+                    endSide = detectSideFromPoint(tgtBounds, endPt);
+                }
+            }
         }
         // Priority 3: Calculate from target shape
-        else if (tgtShape) {
-            if (isOrthogonal && waypoints.length > 0) {
-                // For orthogonal edges, connect orthogonally to last waypoint
-                const lastWp = waypoints[waypoints.length - 1];
-                endPt = getOrthogonalConnectionPoint(tgtShape, lastWp.x, lastWp.y);
-            } else if (srcShape) {
-                const srcBounds = getShapeBounds(srcShape);
+        if (!endPt && tgtShape) {
+            if (srcBounds) {
                 endPt = getEdgeIntersection(tgtShape, srcBounds.cx, srcBounds.cy);
+                endSide = detectSideFromPoint(tgtBounds, endPt);
             } else if (startPt) {
                 endPt = getEdgeIntersection(tgtShape, startPt.x, startPt.y);
+                endSide = detectSideFromPoint(tgtBounds, endPt);
+            } else if (waypoints.length > 0) {
+                const lastWp = waypoints[waypoints.length - 1];
+                endPt = getEdgeIntersection(tgtShape, lastWp.x, lastWp.y);
+                endSide = detectSideFromPoint(tgtBounds, endPt);
             } else {
-                const tgtBounds = getShapeBounds(tgtShape);
                 endPt = { x: tgtBounds.cx, y: tgtBounds.y };
+                endSide = 'top';
             }
         }
 
-        if (endPt) pts.push(endPt);
+        // === BUILD PATH POINTS ===
+        let pts = [];
 
-        // === FALLBACK: Use all available points ===
-        if (pts.length < 2) {
+        if (startPt && endPt) {
+            if (waypoints.length > 0) {
+                // Use explicit waypoints
+                pts.push(startPt);
+                waypoints.forEach(p => pts.push({ x: p.x, y: p.y }));
+                pts.push(endPt);
+            } else if (isOrthogonal || isEntityRelation) {
+                // Generate orthogonal path with advanced routing
+                pts = generateOrthogonalPath(startPt, endPt, startSide, endSide, srcBounds, tgtBounds);
+            } else {
+                // Direct line
+                pts.push(startPt);
+                pts.push(endPt);
+            }
+        } else if (startPt && waypoints.length > 0) {
+            pts.push(startPt);
+            waypoints.forEach(p => pts.push({ x: p.x, y: p.y }));
+        } else if (endPt && waypoints.length > 0) {
+            waypoints.forEach(p => pts.push({ x: p.x, y: p.y }));
+            pts.push(endPt);
+        } else {
+            // Fallback: use all available points
             const allPts = elem.points.filter(p => p.as !== 'offset' && !isNaN(p.x) && !isNaN(p.y));
             if (allPts.length >= 2) {
                 pts = allPts.map(p => ({ x: p.x, y: p.y }));
@@ -738,34 +897,96 @@
         if (pts.length < 2) return '';
 
         // Build SVG path
-        let d = `M${pts[0].x.toFixed(1)},${pts[0].y.toFixed(1)}`;
-        for (let i = 1; i < pts.length; i++) {
-            d += ` L${pts[i].x.toFixed(1)},${pts[i].y.toFixed(1)}`;
+        let d;
+        if (curved && pts.length > 2) {
+            // Curved path using quadratic bezier
+            d = `M${pts[0].x.toFixed(1)},${pts[0].y.toFixed(1)}`;
+            for (let i = 1; i < pts.length - 1; i++) {
+                const curr = pts[i];
+                const next = pts[i + 1];
+                const midX = (curr.x + next.x) / 2;
+                const midY = (curr.y + next.y) / 2;
+                d += ` Q${curr.x.toFixed(1)},${curr.y.toFixed(1)} ${midX.toFixed(1)},${midY.toFixed(1)}`;
+            }
+            const last = pts[pts.length - 1];
+            d += ` L${last.x.toFixed(1)},${last.y.toFixed(1)}`;
+        } else if (rounded && pts.length > 2) {
+            // Rounded corners
+            const radius = 5;
+            d = `M${pts[0].x.toFixed(1)},${pts[0].y.toFixed(1)}`;
+            for (let i = 1; i < pts.length - 1; i++) {
+                const prev = pts[i - 1];
+                const curr = pts[i];
+                const next = pts[i + 1];
+
+                // Calculate vectors
+                const v1x = curr.x - prev.x, v1y = curr.y - prev.y;
+                const v2x = next.x - curr.x, v2y = next.y - curr.y;
+                const len1 = Math.sqrt(v1x * v1x + v1y * v1y);
+                const len2 = Math.sqrt(v2x * v2x + v2y * v2y);
+
+                if (len1 > 0 && len2 > 0) {
+                    const r = Math.min(radius, len1 / 2, len2 / 2);
+                    const p1x = curr.x - (v1x / len1) * r;
+                    const p1y = curr.y - (v1y / len1) * r;
+                    const p2x = curr.x + (v2x / len2) * r;
+                    const p2y = curr.y + (v2y / len2) * r;
+
+                    d += ` L${p1x.toFixed(1)},${p1y.toFixed(1)}`;
+                    d += ` Q${curr.x.toFixed(1)},${curr.y.toFixed(1)} ${p2x.toFixed(1)},${p2y.toFixed(1)}`;
+                } else {
+                    d += ` L${curr.x.toFixed(1)},${curr.y.toFixed(1)}`;
+                }
+            }
+            d += ` L${pts[pts.length - 1].x.toFixed(1)},${pts[pts.length - 1].y.toFixed(1)}`;
+        } else {
+            // Standard polyline
+            d = `M${pts[0].x.toFixed(1)},${pts[0].y.toFixed(1)}`;
+            for (let i = 1; i < pts.length; i++) {
+                d += ` L${pts[i].x.toFixed(1)},${pts[i].y.toFixed(1)}`;
+            }
         }
 
         let svg = '';
         const markerId = `m_${elem.id || Math.random().toString(36).substr(2, 6)}`;
 
-        // Arrow markers
+        // Arrow markers - check for default classic arrow
         const endArrow = elem.style.endArrow;
         const startArrow = elem.style.startArrow;
-        const hasEndArrow = endArrow && endArrow !== 'none' && endArrow !== '0';
+        // Default to classic arrow if not explicitly set to none
+        const hasEndArrow = endArrow !== 'none' && endArrow !== '0';
         const hasStartArrow = startArrow && startArrow !== 'none' && startArrow !== '0';
 
         if (hasEndArrow || hasStartArrow) {
             svg += '<defs>';
             if (hasEndArrow) {
-                svg += `<marker id="${markerId}_e" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto">`;
-                svg += endArrow === 'open'
-                    ? `<path d="M0,0 L10,5 L0,10" fill="none" stroke="${stroke}" stroke-width="1"/>`
-                    : `<path d="M0,0 L0,10 L10,5 Z" fill="${stroke}"/>`;
+                svg += `<marker id="${markerId}_e" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto" markerUnits="userSpaceOnUse">`;
+                if (endArrow === 'open') {
+                    svg += `<path d="M0,0 L10,5 L0,10" fill="none" stroke="${stroke}" stroke-width="1.5"/>`;
+                } else if (endArrow === 'diamond' || endArrow === 'diamondThin') {
+                    svg += `<path d="M0,5 L5,0 L10,5 L5,10 Z" fill="${stroke}"/>`;
+                } else if (endArrow === 'circle' || endArrow === 'oval') {
+                    svg += `<circle cx="5" cy="5" r="4" fill="${stroke}"/>`;
+                } else if (endArrow === 'block') {
+                    svg += `<rect x="0" y="1" width="9" height="8" fill="${stroke}"/>`;
+                } else {
+                    svg += `<path d="M0,1 L0,9 L9,5 Z" fill="${stroke}"/>`;
+                }
                 svg += '</marker>';
             }
             if (hasStartArrow) {
-                svg += `<marker id="${markerId}_s" markerWidth="10" markerHeight="10" refX="1" refY="5" orient="auto">`;
-                svg += startArrow === 'open'
-                    ? `<path d="M10,0 L0,5 L10,10" fill="none" stroke="${stroke}" stroke-width="1"/>`
-                    : `<path d="M10,0 L10,10 L0,5 Z" fill="${stroke}"/>`;
+                svg += `<marker id="${markerId}_s" markerWidth="10" markerHeight="10" refX="1" refY="5" orient="auto" markerUnits="userSpaceOnUse">`;
+                if (startArrow === 'open') {
+                    svg += `<path d="M10,0 L0,5 L10,10" fill="none" stroke="${stroke}" stroke-width="1.5"/>`;
+                } else if (startArrow === 'diamond' || startArrow === 'diamondThin') {
+                    svg += `<path d="M0,5 L5,0 L10,5 L5,10 Z" fill="${stroke}"/>`;
+                } else if (startArrow === 'circle' || startArrow === 'oval') {
+                    svg += `<circle cx="5" cy="5" r="4" fill="${stroke}"/>`;
+                } else if (startArrow === 'block') {
+                    svg += `<rect x="1" y="1" width="9" height="8" fill="${stroke}"/>`;
+                } else {
+                    svg += `<path d="M10,1 L10,9 L1,5 Z" fill="${stroke}"/>`;
+                }
                 svg += '</marker>';
             }
             svg += '</defs>';
@@ -781,16 +1002,30 @@
         if (elem.value) {
             const text = decodeHtml(elem.value).replace(/<[^>]+>/g, '').trim();
             if (text) {
+                // Find label position - consider offset
+                const offsetData = elem.points.find(p => p.as === 'offset');
+                let labelX, labelY;
+
                 const midIdx = Math.floor(pts.length / 2);
                 const p1 = pts[Math.max(0, midIdx - 1)];
                 const p2 = pts[Math.min(pts.length - 1, midIdx)];
-                const midX = (p1.x + p2.x) / 2;
-                const midY = (p1.y + p2.y) / 2;
+                labelX = (p1.x + p2.x) / 2;
+                labelY = (p1.y + p2.y) / 2;
+
+                if (offsetData && !isNaN(offsetData.x) && !isNaN(offsetData.y)) {
+                    labelX += offsetData.x;
+                    labelY += offsetData.y;
+                }
+
                 const fs = parseFloat(elem.style.fontSize) || 11;
                 const fc = getColor(elem.style.fontColor, '#000000');
 
-                svg += `<rect x="${midX - text.length * fs * 0.3}" y="${midY - fs}" width="${text.length * fs * 0.6}" height="${fs + 4}" fill="white" opacity="0.9"/>`;
-                svg += `<text x="${midX}" y="${midY}" text-anchor="middle" font-family="sans-serif" font-size="${fs}" fill="${fc}">${escapeXml(text)}</text>`;
+                // Calculate text width more accurately
+                const textWidth = text.length * fs * 0.55;
+                const textHeight = fs * 1.3;
+
+                svg += `<rect x="${labelX - textWidth/2 - 2}" y="${labelY - textHeight/2}" width="${textWidth + 4}" height="${textHeight}" fill="white" fill-opacity="0.9" rx="2"/>`;
+                svg += `<text x="${labelX}" y="${labelY + fs * 0.35}" text-anchor="middle" font-family="sans-serif" font-size="${fs}" fill="${fc}">${escapeXml(text)}</text>`;
             }
         }
 
