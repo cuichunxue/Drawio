@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Draw.io → SVG/PNG 変換</title>
+    <title>Draw.io → SVG/PNG 変換 (改善版)</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pako/2.1.0/pako.min.js"></script>
     <script>
         if (typeof pako === 'undefined') {
@@ -17,6 +17,7 @@
             --primary-dark: #4338ca;
             --success: #10b981;
             --error: #ef4444;
+            --warning: #f59e0b;
             --bg: #f8fafc;
             --card: #ffffff;
             --text: #1e293b;
@@ -48,6 +49,8 @@
         .btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; padding: 12px 20px; border: none; border-radius: 8px; font-size: 1rem; font-weight: 600; cursor: pointer; transition: all 0.15s; width: 100%; }
         .btn-success { background: var(--success); color: white; }
         .btn-success:hover { background: #059669; }
+        .btn-warning { background: var(--warning); color: white; margin-top: 8px; }
+        .btn-warning:hover { background: #d97706; }
         .options-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
         .option-btn { padding: 16px; border: 2px solid var(--border); border-radius: 8px; background: white; cursor: pointer; text-align: center; transition: all 0.15s; }
         .option-btn:hover { border-color: var(--primary); }
@@ -66,6 +69,7 @@
         .message.show { transform: translateY(0); opacity: 1; }
         .message.success { background: var(--success); color: white; }
         .message.error { background: var(--error); color: white; }
+        .message.warning { background: var(--warning); color: white; }
         .loading { position: fixed; inset: 0; background: rgba(255,255,255,0.9); display: none; align-items: center; justify-content: center; z-index: 2000; flex-direction: column; gap: 16px; }
         .loading.show { display: flex; }
         .spinner { width: 40px; height: 40px; border: 4px solid var(--border); border-top-color: var(--primary); border-radius: 50%; animation: spin 1s linear infinite; }
@@ -75,6 +79,22 @@
         .page-btn:hover { border-color: var(--primary); }
         .page-btn.selected { background: var(--primary); color: white; border-color: var(--primary); }
         #fileInput { display: none; }
+
+        /* Debug Console Styles */
+        .debug-console { background: #1e293b; color: #e2e8f0; border-radius: 8px; padding: 16px; max-height: 300px; overflow-y: auto; font-family: 'Courier New', monospace; font-size: 0.75rem; }
+        .debug-console.collapsed { max-height: 40px; overflow: hidden; }
+        .debug-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; cursor: pointer; }
+        .debug-header h3 { font-size: 0.875rem; color: #94a3b8; }
+        .debug-toggle { background: #334155; border: none; color: #e2e8f0; padding: 4px 12px; border-radius: 4px; cursor: pointer; font-size: 0.75rem; }
+        .debug-entry { margin-bottom: 4px; padding: 4px; border-left: 2px solid #475569; }
+        .debug-entry.info { border-left-color: #3b82f6; }
+        .debug-entry.success { border-left-color: #10b981; }
+        .debug-entry.warning { border-left-color: #f59e0b; }
+        .debug-entry.error { border-left-color: #ef4444; }
+        .debug-time { color: #64748b; }
+        .debug-message { color: #e2e8f0; }
+        .debug-clear { background: #ef4444; border: none; color: white; padding: 4px 12px; border-radius: 4px; cursor: pointer; font-size: 0.75rem; margin-left: 8px; }
+
         @media (max-width: 600px) {
             .container { padding: 12px; }
             h1 { font-size: 1.25rem; }
@@ -86,7 +106,8 @@
 </head>
 <body>
     <div class="container">
-        <h1>📐 Draw.io → SVG/PNG 変換</h1>
+        <h1>📐 Draw.io → SVG/PNG 変換 (改善版)</h1>
+
         <div class="card">
             <div class="card-title">1. ファイルを選択</div>
             <div class="drop-zone" id="dropZone">
@@ -102,10 +123,12 @@
                 </div>
             </div>
         </div>
+
         <div class="card" id="pageCard" style="display: none;">
             <div class="card-title">2. ページ選択</div>
             <div class="page-list" id="pageList"></div>
         </div>
+
         <div class="card" id="previewCard" style="display: none;">
             <div class="card-title">プレビュー</div>
             <div class="preview-area" id="previewArea">
@@ -115,6 +138,7 @@
                 </div>
             </div>
         </div>
+
         <div class="card" id="exportCard" style="display: none;">
             <div class="card-title">3. エクスポート設定</div>
             <div class="options-grid" style="margin-bottom: 16px;">
@@ -137,8 +161,23 @@
                 </div>
             </div>
             <button class="btn btn-success" id="exportBtn">⬇️ ダウンロード</button>
+            <button class="btn btn-warning" id="debugDownloadBtn" style="display: none;">🔍 デバッグ情報をダウンロード</button>
+        </div>
+
+        <div class="card" id="debugCard">
+            <div class="debug-console collapsed" id="debugConsole">
+                <div class="debug-header" id="debugHeader">
+                    <h3>🔍 デバッグコンソール</h3>
+                    <div>
+                        <button class="debug-clear" id="debugClear">クリア</button>
+                        <button class="debug-toggle" id="debugToggle">展開</button>
+                    </div>
+                </div>
+                <div id="debugOutput"></div>
+            </div>
         </div>
     </div>
+
     <input type="file" id="fileInput" accept="*">
     <div class="message" id="message"></div>
     <div class="loading" id="loading">
@@ -150,6 +189,70 @@
 (function() {
     'use strict';
 
+    // ========== Debug Logger ==========
+    const DebugLogger = {
+        logs: [],
+        maxLogs: 100,
+
+        log(message, type = 'info') {
+            const timestamp = new Date().toLocaleTimeString('ja-JP');
+            this.logs.push({ timestamp, message, type });
+
+            if (this.logs.length > this.maxLogs) {
+                this.logs.shift();
+            }
+
+            this.render();
+            console.log(`[${type.toUpperCase()}] ${message}`);
+        },
+
+        info(message) { this.log(message, 'info'); },
+        success(message) { this.log(message, 'success'); },
+        warning(message) { this.log(message, 'warning'); },
+        error(message) { this.log(message, 'error'); },
+
+        render() {
+            const output = document.getElementById('debugOutput');
+            if (!output) return;
+
+            output.innerHTML = this.logs.map(log =>
+                `<div class="debug-entry ${log.type}">
+                    <span class="debug-time">[${log.timestamp}]</span>
+                    <span class="debug-message">${this.escapeHtml(log.message)}</span>
+                </div>`
+            ).join('');
+
+            output.scrollTop = output.scrollHeight;
+        },
+
+        clear() {
+            this.logs = [];
+            this.render();
+        },
+
+        escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        },
+
+        downloadLogs() {
+            const content = this.logs.map(log =>
+                `[${log.timestamp}] [${log.type.toUpperCase()}] ${log.message}`
+            ).join('\n');
+
+            const blob = new Blob([content], { type: 'text/plain' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `drawio-debug-${Date.now()}.txt`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        }
+    };
+
     // State
     let currentFile = null;
     let diagrams = [];
@@ -157,6 +260,7 @@
     let selectedFormat = 'svg';
     let pngScale = 2;
     let currentSvgContent = null;
+    let renderErrors = [];
 
     // DOM
     const $ = id => document.getElementById(id);
@@ -174,9 +278,14 @@
     const scaleSlider = $('scaleSlider');
     const scaleValue = $('scaleValue');
     const exportBtn = $('exportBtn');
+    const debugDownloadBtn = $('debugDownloadBtn');
     const message = $('message');
     const loading = $('loading');
     const loadingText = $('loadingText');
+    const debugConsole = $('debugConsole');
+    const debugToggle = $('debugToggle');
+    const debugClear = $('debugClear');
+    const debugHeader = $('debugHeader');
 
     // Utils
     function showMessage(text, type = 'success') {
@@ -200,101 +309,247 @@
         return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
     }
 
-    // Decoder
+    // ========== Improved Decoder ==========
     function decodeDrawioData(data) {
-        if (!data) return null;
+        if (!data) {
+            DebugLogger.error('デコード: データが空です');
+            return null;
+        }
+
         data = data.trim();
-        if (data.startsWith('<')) return data;
+
+        if (data.startsWith('<')) {
+            DebugLogger.success('デコード: XMLデータを直接検出');
+            return data;
+        }
+
+        DebugLogger.info(`デコード開始: データ長 ${data.length} バイト`);
 
         const strategies = [
-            () => { const b = atob(data); const u = Uint8Array.from(b, c => c.charCodeAt(0)); return decodeURIComponent(new TextDecoder().decode(pako.inflateRaw(u))); },
-            () => { const b = atob(data); const u = Uint8Array.from(b, c => c.charCodeAt(0)); return decodeURIComponent(new TextDecoder().decode(pako.inflate(u))); },
-            () => { const b = atob(data); const u = Uint8Array.from(b, c => c.charCodeAt(0)); return new TextDecoder().decode(pako.inflateRaw(u)); },
-            () => { const b = atob(data); const u = Uint8Array.from(b, c => c.charCodeAt(0)); return new TextDecoder().decode(pako.inflate(u)); },
-            () => decodeURIComponent(atob(data)),
-            () => atob(data)
+            {
+                name: 'Base64 + Deflate + URL Decode',
+                fn: () => {
+                    const b = atob(data);
+                    const u = Uint8Array.from(b, c => c.charCodeAt(0));
+                    return decodeURIComponent(new TextDecoder().decode(pako.inflateRaw(u)));
+                }
+            },
+            {
+                name: 'Base64 + Inflate + URL Decode',
+                fn: () => {
+                    const b = atob(data);
+                    const u = Uint8Array.from(b, c => c.charCodeAt(0));
+                    return decodeURIComponent(new TextDecoder().decode(pako.inflate(u)));
+                }
+            },
+            {
+                name: 'Base64 + Deflate',
+                fn: () => {
+                    const b = atob(data);
+                    const u = Uint8Array.from(b, c => c.charCodeAt(0));
+                    return new TextDecoder().decode(pako.inflateRaw(u));
+                }
+            },
+            {
+                name: 'Base64 + Inflate',
+                fn: () => {
+                    const b = atob(data);
+                    const u = Uint8Array.from(b, c => c.charCodeAt(0));
+                    return new TextDecoder().decode(pako.inflate(u));
+                }
+            },
+            {
+                name: 'Base64 + URL Decode',
+                fn: () => decodeURIComponent(atob(data))
+            },
+            {
+                name: 'Base64のみ',
+                fn: () => atob(data)
+            },
+            {
+                name: 'URL Decode',
+                fn: () => decodeURIComponent(data)
+            }
         ];
 
         for (const strategy of strategies) {
             try {
-                const result = strategy();
-                if (result && (result.includes('mxGraphModel') || result.includes('mxCell'))) return result;
-            } catch (e) {}
+                DebugLogger.info(`デコード試行: ${strategy.name}`);
+                const result = strategy.fn();
+
+                if (result && (result.includes('mxGraphModel') || result.includes('mxCell'))) {
+                    DebugLogger.success(`デコード成功: ${strategy.name}`);
+                    return result;
+                } else if (result) {
+                    DebugLogger.warning(`デコード結果に mxGraphModel が見つかりません: ${strategy.name}`);
+                }
+            } catch (e) {
+                DebugLogger.warning(`デコード失敗 (${strategy.name}): ${e.message}`);
+            }
         }
+
+        DebugLogger.error('すべてのデコード戦略が失敗しました');
         return null;
     }
 
-    // Parser
+    // ========== Improved Parser ==========
     function parseDrawioFile(content, filename) {
-        content = content.replace(/^\uFEFF/, '').trim();
-        const mxMatch = content.match(/<mxfile[\s\S]*<\/mxfile>/i);
-        if (mxMatch) content = mxMatch[0];
+        DebugLogger.info(`ファイルパース開始: ${filename}`);
 
-        const parser = new DOMParser();
-        let doc = parser.parseFromString(content, 'text/xml');
+        try {
+            // Remove BOM
+            content = content.replace(/^\uFEFF/, '').trim();
+            DebugLogger.info(`コンテンツ長: ${content.length} 文字`);
 
-        if (doc.querySelector('parsererror')) {
-            doc = parser.parseFromString(content, 'text/html');
-        }
+            // Extract mxfile if embedded
+            const mxMatch = content.match(/<mxfile[\s\S]*?<\/mxfile>/i);
+            if (mxMatch) {
+                content = mxMatch[0];
+                DebugLogger.info('mxfile タグを抽出しました');
+            }
 
-        const results = [];
-        const mxfile = doc.querySelector('mxfile');
+            const parser = new DOMParser();
+            let doc;
 
-        if (mxfile) {
-            const diagramEls = mxfile.querySelectorAll('diagram');
-            for (let i = 0; i < diagramEls.length; i++) {
-                const diag = diagramEls[i];
-                const name = diag.getAttribute('name') || `ページ ${i + 1}`;
-                let model = diag.querySelector('mxGraphModel');
+            // Try XML parsing first
+            doc = parser.parseFromString(content, 'text/xml');
+            const parseError = doc.querySelector('parsererror');
 
-                if (!model) {
-                    const compressed = diag.textContent.trim();
-                    if (compressed && !compressed.startsWith('<')) {
-                        const decoded = decodeDrawioData(compressed);
-                        if (decoded) {
-                            const innerDoc = parser.parseFromString(decoded, 'text/xml');
-                            if (!innerDoc.querySelector('parsererror')) {
-                                model = innerDoc.querySelector('mxGraphModel');
+            if (parseError) {
+                DebugLogger.warning('XML パースエラー: ' + parseError.textContent.substring(0, 200));
+
+                // Try HTML parsing as fallback
+                doc = parser.parseFromString(content, 'text/html');
+                DebugLogger.info('HTML パーサーにフォールバック');
+            } else {
+                DebugLogger.success('XML パース成功');
+            }
+
+            const results = [];
+            const mxfile = doc.querySelector('mxfile');
+
+            if (mxfile) {
+                DebugLogger.info('mxfile 要素を検出');
+                const diagramEls = mxfile.querySelectorAll('diagram');
+                DebugLogger.info(`ダイアグラム数: ${diagramEls.length}`);
+
+                for (let i = 0; i < diagramEls.length; i++) {
+                    const diag = diagramEls[i];
+                    const name = diag.getAttribute('name') || `ページ ${i + 1}`;
+                    DebugLogger.info(`ダイアグラム ${i + 1} を処理中: ${name}`);
+
+                    let model = diag.querySelector('mxGraphModel');
+
+                    if (!model) {
+                        const compressed = diag.textContent.trim();
+                        if (compressed && !compressed.startsWith('<')) {
+                            DebugLogger.info(`圧縮データをデコード中 (長さ: ${compressed.length})`);
+                            const decoded = decodeDrawioData(compressed);
+
+                            if (decoded) {
+                                const innerDoc = parser.parseFromString(decoded, 'text/xml');
+                                const innerError = innerDoc.querySelector('parsererror');
+
+                                if (!innerError) {
+                                    model = innerDoc.querySelector('mxGraphModel');
+                                    if (model) {
+                                        DebugLogger.success(`mxGraphModel を取得: ${name}`);
+                                    }
+                                } else {
+                                    DebugLogger.error(`デコード後のXMLパースエラー: ${innerError.textContent.substring(0, 100)}`);
+                                }
                             }
+                        } else if (compressed && compressed.startsWith('<')) {
+                            DebugLogger.info('非圧縮XMLデータを検出');
+                            const innerDoc = parser.parseFromString(compressed, 'text/xml');
+                            model = innerDoc.querySelector('mxGraphModel');
                         }
+                    } else {
+                        DebugLogger.success(`直接 mxGraphModel を検出: ${name}`);
+                    }
+
+                    if (model) {
+                        const cellCount = model.querySelectorAll('mxCell').length;
+                        DebugLogger.success(`ダイアグラム追加: ${name} (セル数: ${cellCount})`);
+                        results.push({ name, model, index: i });
+                    } else {
+                        DebugLogger.error(`mxGraphModel が見つかりません: ${name}`);
                     }
                 }
+            } else {
+                DebugLogger.info('単一ダイアグラムとして処理');
+                const model = doc.querySelector('mxGraphModel');
 
-                if (model) results.push({ name, model, index: i });
+                if (model) {
+                    const cellCount = model.querySelectorAll('mxCell').length;
+                    DebugLogger.success(`mxGraphModel を検出 (セル数: ${cellCount})`);
+                    results.push({
+                        name: filename.replace(/\.(drawio|xml)$/i, ''),
+                        model,
+                        index: 0
+                    });
+                } else {
+                    DebugLogger.error('mxGraphModel が見つかりません');
+                }
             }
-        } else {
-            const model = doc.querySelector('mxGraphModel');
-            if (model) results.push({ name: filename.replace(/\.(drawio|xml)$/i, ''), model, index: 0 });
-        }
 
-        if (results.length === 0) throw new Error('ダイアグラムが見つかりません');
-        return results;
+            if (results.length === 0) {
+                throw new Error('ダイアグラムが見つかりません。ファイル形式を確認してください。');
+            }
+
+            DebugLogger.success(`合計 ${results.length} 個のダイアグラムを検出`);
+            return results;
+
+        } catch (error) {
+            DebugLogger.error(`パースエラー: ${error.message}`);
+            DebugLogger.error(`スタックトレース: ${error.stack}`);
+            throw error;
+        }
     }
 
-    // Style parser
+    // ========== Style parser ==========
     function parseStyle(str) {
         const s = {};
         if (!str) return s;
-        str.split(';').forEach(part => {
-            const idx = part.indexOf('=');
-            if (idx > 0) {
-                s[part.substring(0, idx).trim()] = part.substring(idx + 1).trim();
-            } else if (part.trim()) {
-                s[part.trim()] = true;
-            }
-        });
+
+        try {
+            str.split(';').forEach(part => {
+                const idx = part.indexOf('=');
+                if (idx > 0) {
+                    const key = part.substring(0, idx).trim();
+                    const value = part.substring(idx + 1).trim();
+                    s[key] = value;
+                } else if (part.trim()) {
+                    s[part.trim()] = true;
+                }
+            });
+        } catch (e) {
+            DebugLogger.warning(`スタイルパースエラー: ${e.message}`);
+        }
+
         return s;
     }
 
     function decodeHtml(text) {
         if (!text) return '';
-        const ta = document.createElement('textarea');
-        ta.innerHTML = text;
-        return ta.value;
+        try {
+            const ta = document.createElement('textarea');
+            ta.innerHTML = text;
+            return ta.value;
+        } catch (e) {
+            DebugLogger.warning(`HTMLデコードエラー: ${e.message}`);
+            return text;
+        }
     }
 
     function escapeXml(str) {
-        return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+        if (!str) return '';
+        return String(str)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&apos;');
     }
 
     function getColor(c, def) {
@@ -302,144 +557,232 @@
         return c;
     }
 
-    // SVG Renderer
+    // ========== Improved SVG Renderer ==========
     function renderToSvg(model) {
-        const cells = model.querySelectorAll('mxCell');
-        const shapeMap = {};
-        const shapes = [];
-        const edges = [];
+        DebugLogger.info('SVGレンダリング開始');
+        renderErrors = [];
 
-        // First pass: collect all elements
-        cells.forEach(cell => {
-            const id = cell.getAttribute('id');
-            if (id === '0' || id === '1') return;
+        try {
+            const cells = model.querySelectorAll('mxCell');
+            DebugLogger.info(`mxCell 数: ${cells.length}`);
 
-            const geom = cell.querySelector('mxGeometry');
-            const styleStr = cell.getAttribute('style') || '';
-            const style = parseStyle(styleStr);
-            const value = cell.getAttribute('value') || '';
-            const parent = cell.getAttribute('parent');
-            const source = cell.getAttribute('source');
-            const target = cell.getAttribute('target');
+            const shapeMap = {};
+            const shapes = [];
+            const edges = [];
 
-            // Determine if edge: edge="1" attribute OR has both source and target
-            const isEdge = cell.getAttribute('edge') === '1' || (source && target);
+            // First pass: collect all elements
+            cells.forEach((cell, idx) => {
+                try {
+                    const id = cell.getAttribute('id');
+                    if (id === '0' || id === '1') return;
 
-            let x = 0, y = 0, w = 0, h = 0;
-            let points = [];
+                    const geom = cell.querySelector('mxGeometry');
+                    const styleStr = cell.getAttribute('style') || '';
+                    const style = parseStyle(styleStr);
+                    const value = cell.getAttribute('value') || '';
+                    const parent = cell.getAttribute('parent');
+                    const source = cell.getAttribute('source');
+                    const target = cell.getAttribute('target');
 
-            if (geom) {
-                x = parseFloat(geom.getAttribute('x')) || 0;
-                y = parseFloat(geom.getAttribute('y')) || 0;
-                w = parseFloat(geom.getAttribute('width')) || 0;
-                h = parseFloat(geom.getAttribute('height')) || 0;
+                    const isEdge = cell.getAttribute('edge') === '1' || (source && target);
 
-                // Collect points for edges
-                geom.querySelectorAll(':scope > mxPoint').forEach(pt => {
-                    const px = parseFloat(pt.getAttribute('x'));
-                    const py = parseFloat(pt.getAttribute('y'));
-                    const as = pt.getAttribute('as');
-                    if (!isNaN(px) && !isNaN(py)) {
-                        points.push({ x: px, y: py, as });
+                    let x = 0, y = 0, w = 0, h = 0;
+                    let points = [];
+
+                    if (geom) {
+                        x = parseFloat(geom.getAttribute('x')) || 0;
+                        y = parseFloat(geom.getAttribute('y')) || 0;
+                        w = parseFloat(geom.getAttribute('width')) || 0;
+                        h = parseFloat(geom.getAttribute('height')) || 0;
+
+                        // Collect points
+                        geom.querySelectorAll(':scope > mxPoint').forEach(pt => {
+                            const px = parseFloat(pt.getAttribute('x'));
+                            const py = parseFloat(pt.getAttribute('y'));
+                            const as = pt.getAttribute('as');
+                            if (!isNaN(px) && !isNaN(py)) {
+                                points.push({ x: px, y: py, as });
+                            }
+                        });
+
+                        geom.querySelectorAll('Array[as="points"] > mxPoint').forEach(pt => {
+                            const px = parseFloat(pt.getAttribute('x'));
+                            const py = parseFloat(pt.getAttribute('y'));
+                            if (!isNaN(px) && !isNaN(py)) {
+                                points.push({ x: px, y: py, as: 'waypoint' });
+                            }
+                        });
                     }
-                });
 
-                // Collect points from Array
-                geom.querySelectorAll('Array[as="points"] > mxPoint').forEach(pt => {
-                    const px = parseFloat(pt.getAttribute('x'));
-                    const py = parseFloat(pt.getAttribute('y'));
-                    if (!isNaN(px) && !isNaN(py)) {
-                        points.push({ x: px, y: py, as: 'waypoint' });
+                    const elem = {
+                        id, parent, x, y, w, h, style, styleStr, value,
+                        source, target, points, isEdge
+                    };
+
+                    if (id) shapeMap[id] = elem;
+
+                    if (isEdge) {
+                        edges.push(elem);
+                    } else if (w > 0 || h > 0) {
+                        shapes.push(elem);
                     }
-                });
-            }
-
-            const elem = {
-                id, parent, x, y, w, h, style, styleStr, value,
-                source, target, points, isEdge
-            };
-
-            if (id) shapeMap[id] = elem;
-
-            if (isEdge) {
-                edges.push(elem);
-            } else if (w > 0 || h > 0) {
-                shapes.push(elem);
-            }
-        });
-
-        // Calculate absolute positions for shapes
-        function getAbsolutePosition(elem) {
-            let absX = elem.x, absY = elem.y;
-            let parentId = elem.parent;
-            while (parentId && parentId !== '0' && parentId !== '1') {
-                const parentElem = shapeMap[parentId];
-                if (parentElem && !parentElem.isEdge) {
-                    absX += parentElem.x;
-                    absY += parentElem.y;
-                    parentId = parentElem.parent;
-                } else {
-                    break;
-                }
-            }
-            return { x: absX, y: absY };
-        }
-
-        shapes.forEach(elem => {
-            const pos = getAbsolutePosition(elem);
-            elem.absX = pos.x;
-            elem.absY = pos.y;
-        });
-
-        // Calculate bounds
-        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-
-        shapes.forEach(elem => {
-            minX = Math.min(minX, elem.absX);
-            minY = Math.min(minY, elem.absY);
-            maxX = Math.max(maxX, elem.absX + elem.w);
-            maxY = Math.max(maxY, elem.absY + elem.h);
-        });
-
-        edges.forEach(elem => {
-            elem.points.forEach(p => {
-                if (p.as !== 'offset') {
-                    minX = Math.min(minX, p.x);
-                    minY = Math.min(minY, p.y);
-                    maxX = Math.max(maxX, p.x);
-                    maxY = Math.max(maxY, p.y);
+                } catch (e) {
+                    const error = `セル処理エラー (${idx}): ${e.message}`;
+                    DebugLogger.error(error);
+                    renderErrors.push(error);
                 }
             });
-        });
 
-        if (minX === Infinity) { minX = 0; minY = 0; maxX = 400; maxY = 300; }
+            DebugLogger.info(`図形: ${shapes.length}, エッジ: ${edges.length}`);
 
-        const pad = 50;
-        const width = Math.max(100, (maxX - minX) + pad * 2);
-        const height = Math.max(100, (maxY - minY) + pad * 2);
-        const ox = pad - minX;
-        const oy = pad - minY;
+            // Calculate absolute positions
+            shapes.forEach((elem, idx) => {
+                try {
+                    const pos = getAbsolutePosition(elem, shapeMap);
+                    elem.absX = pos.x;
+                    elem.absY = pos.y;
+                } catch (e) {
+                    const error = `位置計算エラー (図形 ${idx}): ${e.message}`;
+                    DebugLogger.warning(error);
+                    renderErrors.push(error);
+                    elem.absX = elem.x;
+                    elem.absY = elem.y;
+                }
+            });
 
-        let svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">`;
-        svg += `<defs>`;
-        svg += `<marker id="arrowEnd" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto"><path d="M0,0 L0,12 L12,6 Z" fill="#000"/></marker>`;
-        svg += `<marker id="arrowStart" markerWidth="12" markerHeight="12" refX="2" refY="6" orient="auto"><path d="M12,0 L12,12 L0,6 Z" fill="#000"/></marker>`;
-        svg += `</defs>`;
-        svg += `<rect width="100%" height="100%" fill="white"/>`;
-        svg += `<g transform="translate(${ox},${oy})">`;
+            // Calculate bounds
+            let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
 
-        // Render shapes first
-        shapes.forEach(elem => {
-            svg += renderShape(elem);
-        });
+            shapes.forEach(elem => {
+                minX = Math.min(minX, elem.absX);
+                minY = Math.min(minY, elem.absY);
+                maxX = Math.max(maxX, elem.absX + elem.w);
+                maxY = Math.max(maxY, elem.absY + elem.h);
+            });
 
-        // Render edges
-        edges.forEach(elem => {
-            svg += renderEdge(elem, shapeMap);
-        });
+            edges.forEach(elem => {
+                elem.points.forEach(p => {
+                    if (p.as !== 'offset') {
+                        minX = Math.min(minX, p.x);
+                        minY = Math.min(minY, p.y);
+                        maxX = Math.max(maxX, p.x);
+                        maxY = Math.max(maxY, p.y);
+                    }
+                });
+            });
 
-        svg += '</g></svg>';
-        return { svg, width, height };
+            if (minX === Infinity) {
+                minX = 0; minY = 0; maxX = 400; maxY = 300;
+                DebugLogger.warning('境界が検出されませんでした。デフォルトサイズを使用');
+            }
+
+            const pad = 50;
+            const width = Math.max(100, (maxX - minX) + pad * 2);
+            const height = Math.max(100, (maxY - minY) + pad * 2);
+            const ox = pad - minX;
+            const oy = pad - minY;
+
+            DebugLogger.info(`SVGサイズ: ${width.toFixed(0)} x ${height.toFixed(0)}`);
+
+            let svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">`;
+            svg += `<defs>`;
+            svg += `<marker id="arrowEnd" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto"><path d="M0,0 L0,12 L12,6 Z" fill="#000"/></marker>`;
+            svg += `<marker id="arrowStart" markerWidth="12" markerHeight="12" refX="2" refY="6" orient="auto"><path d="M12,0 L12,12 L0,6 Z" fill="#000"/></marker>`;
+            svg += `</defs>`;
+            svg += `<rect width="100%" height="100%" fill="white"/>`;
+            svg += `<g transform="translate(${ox},${oy})">`;
+
+            // Render shapes
+            let successCount = 0;
+            shapes.forEach((elem, idx) => {
+                try {
+                    svg += renderShape(elem);
+                    successCount++;
+                } catch (e) {
+                    const error = `図形レンダリングエラー (${idx}, ID: ${elem.id}): ${e.message}`;
+                    DebugLogger.error(error);
+                    renderErrors.push(error);
+
+                    // Fallback: render as simple rectangle
+                    try {
+                        svg += `<rect x="${elem.absX}" y="${elem.absY}" width="${elem.w}" height="${elem.h}" fill="#ffcccc" stroke="#ff0000" stroke-width="2" opacity="0.5"/>`;
+                        svg += `<text x="${elem.absX + elem.w/2}" y="${elem.absY + elem.h/2}" text-anchor="middle" fill="#ff0000" font-size="10">ERROR</text>`;
+                    } catch (e2) {
+                        DebugLogger.error(`フォールバックレンダリングも失敗: ${e2.message}`);
+                    }
+                }
+            });
+
+            DebugLogger.info(`図形レンダリング: ${successCount}/${shapes.length} 成功`);
+
+            // Render edges
+            successCount = 0;
+            edges.forEach((elem, idx) => {
+                try {
+                    svg += renderEdge(elem, shapeMap);
+                    successCount++;
+                } catch (e) {
+                    const error = `エッジレンダリングエラー (${idx}, ID: ${elem.id}): ${e.message}`;
+                    DebugLogger.error(error);
+                    renderErrors.push(error);
+
+                    // Fallback: try to draw simple line
+                    try {
+                        if (elem.points && elem.points.length >= 2) {
+                            const p1 = elem.points[0];
+                            const p2 = elem.points[elem.points.length - 1];
+                            svg += `<line x1="${p1.x}" y1="${p1.y}" x2="${p2.x}" y2="${p2.y}" stroke="#ff0000" stroke-width="2" stroke-dasharray="5,5" opacity="0.5"/>`;
+                        }
+                    } catch (e2) {
+                        DebugLogger.error(`エッジフォールバックレンダリング失敗: ${e2.message}`);
+                    }
+                }
+            });
+
+            DebugLogger.info(`エッジレンダリング: ${successCount}/${edges.length} 成功`);
+
+            svg += '</g></svg>';
+
+            if (renderErrors.length > 0) {
+                DebugLogger.warning(`レンダリング中に ${renderErrors.length} 個のエラーが発生しました`);
+                debugDownloadBtn.style.display = 'block';
+            } else {
+                DebugLogger.success('レンダリング完全成功!');
+                debugDownloadBtn.style.display = 'none';
+            }
+
+            return { svg, width, height };
+
+        } catch (error) {
+            DebugLogger.error(`SVGレンダリング致命的エラー: ${error.message}`);
+            DebugLogger.error(`スタックトレース: ${error.stack}`);
+            throw error;
+        }
+    }
+
+    function getAbsolutePosition(elem, shapeMap) {
+        let absX = elem.x, absY = elem.y;
+        let parentId = elem.parent;
+        let depth = 0;
+        const maxDepth = 50; // Prevent infinite loops
+
+        while (parentId && parentId !== '0' && parentId !== '1' && depth < maxDepth) {
+            const parentElem = shapeMap[parentId];
+            if (parentElem && !parentElem.isEdge) {
+                absX += parentElem.x;
+                absY += parentElem.y;
+                parentId = parentElem.parent;
+                depth++;
+            } else {
+                break;
+            }
+        }
+
+        if (depth >= maxDepth) {
+            DebugLogger.warning(`親要素の深度が最大値 (${maxDepth}) に達しました`);
+        }
+
+        return { x: absX, y: absY };
     }
 
     function renderShape(elem) {
@@ -447,7 +790,7 @@
         const stroke = getColor(elem.style.strokeColor, '#000000');
         const sw = parseFloat(elem.style.strokeWidth) || 1;
         const rounded = elem.style.rounded === '1';
-        const opacity = elem.style.opacity || '1';
+        const opacity = elem.style.opacity || elem.style.fillOpacity || '1';
         const w = elem.w, h = elem.h;
         const x = elem.absX;
         const y = elem.absY;
@@ -458,40 +801,36 @@
         const styleStr = elem.styleStr || '';
         const shape = elem.style.shape || '';
 
-        // Cylinder detection
-        if (shape === 'cylinder' || shape === 'cylinder3' ||
-            styleStr.includes('shape=cylinder')) {
+        // Extended shape support
+        if (shape === 'cylinder' || shape === 'cylinder3' || styleStr.includes('shape=cylinder')) {
             const arcH = Math.min(h * 0.15, 20);
             svg += `<path d="M0,${arcH} C0,${arcH/2} ${w/4},0 ${w/2},0 C${w*3/4},0 ${w},${arcH/2} ${w},${arcH} L${w},${h-arcH} C${w},${h-arcH/2} ${w*3/4},${h} ${w/2},${h} C${w/4},${h} 0,${h-arcH/2} 0,${h-arcH} Z" fill="${fill}" stroke="${stroke}" stroke-width="${sw}"/>`;
             svg += `<path d="M0,${arcH} C0,${arcH*1.5} ${w/4},${arcH*2} ${w/2},${arcH*2} C${w*3/4},${arcH*2} ${w},${arcH*1.5} ${w},${arcH}" fill="none" stroke="${stroke}" stroke-width="${sw}"/>`;
         }
-        // Ellipse/Circle
-        else if (elem.style.ellipse === '1' || shape === 'ellipse' || styleStr.includes('ellipse')) {
+        else if (elem.style.ellipse === '1' || shape === 'ellipse' || shape === 'circle' || styleStr.includes('ellipse')) {
             svg += `<ellipse cx="${w/2}" cy="${h/2}" rx="${w/2}" ry="${h/2}" fill="${fill}" stroke="${stroke}" stroke-width="${sw}"/>`;
         }
-        // Diamond/Rhombus
-        else if (elem.style.rhombus === '1' || shape === 'rhombus' || styleStr.includes('rhombus')) {
+        else if (elem.style.rhombus === '1' || shape === 'rhombus' || shape === 'diamond' || styleStr.includes('rhombus')) {
             svg += `<polygon points="${w/2},0 ${w},${h/2} ${w/2},${h} 0,${h/2}" fill="${fill}" stroke="${stroke}" stroke-width="${sw}"/>`;
         }
-        // Triangle
         else if (shape === 'triangle' || styleStr.includes('triangle')) {
             svg += `<polygon points="${w/2},0 ${w},${h} 0,${h}" fill="${fill}" stroke="${stroke}" stroke-width="${sw}"/>`;
         }
-        // Hexagon
         else if (shape === 'hexagon' || styleStr.includes('hexagon')) {
             const inset = w * 0.25;
             svg += `<polygon points="${inset},0 ${w-inset},0 ${w},${h/2} ${w-inset},${h} ${inset},${h} 0,${h/2}" fill="${fill}" stroke="${stroke}" stroke-width="${sw}"/>`;
         }
-        // Cloud
         else if (shape === 'cloud' || styleStr.includes('cloud')) {
             svg += `<path d="M${w*0.25},${h*0.8} C${w*0.05},${h*0.8} 0,${h*0.6} ${w*0.1},${h*0.45} C${w*0.05},${h*0.3} ${w*0.15},${h*0.15} ${w*0.3},${h*0.2} C${w*0.35},${h*0.05} ${w*0.5},0 ${w*0.65},${h*0.1} C${w*0.8},0 ${w*0.95},${h*0.15} ${w*0.9},${h*0.35} C${w},${h*0.45} ${w},${h*0.65} ${w*0.85},${h*0.75} C${w*0.9},${h*0.9} ${w*0.75},${h} ${w*0.6},${h*0.95} C${w*0.5},${h} ${w*0.35},${h} ${w*0.25},${h*0.8} Z" fill="${fill}" stroke="${stroke}" stroke-width="${sw}"/>`;
         }
-        // Parallelogram
         else if (shape === 'parallelogram' || styleStr.includes('parallelogram')) {
             const skew = w * 0.2;
             svg += `<polygon points="${skew},0 ${w},0 ${w-skew},${h} 0,${h}" fill="${fill}" stroke="${stroke}" stroke-width="${sw}"/>`;
         }
-        // Actor (stick figure)
+        else if (shape === 'trapezoid' || styleStr.includes('trapezoid')) {
+            const inset = w * 0.2;
+            svg += `<polygon points="${inset},0 ${w-inset},0 ${w},${h} 0,${h}" fill="${fill}" stroke="${stroke}" stroke-width="${sw}"/>`;
+        }
         else if (shape === 'actor' || shape === 'umlActor' || styleStr.includes('shape=actor') || styleStr.includes('shape=umlActor')) {
             const headR = Math.min(w, h) * 0.15;
             const centerX = w / 2;
@@ -501,36 +840,70 @@
             svg += `<line x1="${centerX}" y1="${h*0.6}" x2="0" y2="${h}" stroke="${stroke}" stroke-width="${sw}"/>`;
             svg += `<line x1="${centerX}" y1="${h*0.6}" x2="${w}" y2="${h}" stroke="${stroke}" stroke-width="${sw}"/>`;
         }
-        // Document
         else if (shape === 'document' || styleStr.includes('shape=document')) {
             const wave = h * 0.1;
             svg += `<path d="M0,0 L${w},0 L${w},${h-wave} Q${w*0.75},${h} ${w/2},${h-wave} Q${w*0.25},${h-wave*2} 0,${h-wave} Z" fill="${fill}" stroke="${stroke}" stroke-width="${sw}"/>`;
         }
-        // Note
         else if (shape === 'note' || styleStr.includes('shape=note')) {
             const fold = Math.min(w, h) * 0.2;
             svg += `<polygon points="0,0 ${w-fold},0 ${w},${fold} ${w},${h} 0,${h}" fill="${fill}" stroke="${stroke}" stroke-width="${sw}"/>`;
             svg += `<polyline points="${w-fold},0 ${w-fold},${fold} ${w},${fold}" fill="none" stroke="${stroke}" stroke-width="${sw}"/>`;
         }
-        // Default: Rectangle
+        else if (shape === 'step' || styleStr.includes('shape=step')) {
+            const step = w * 0.15;
+            svg += `<polygon points="${step},0 ${w},0 ${w-step},${h} 0,${h}" fill="${fill}" stroke="${stroke}" stroke-width="${sw}"/>`;
+        }
+        else if (shape === 'process' || styleStr.includes('shape=process')) {
+            const inset = w * 0.1;
+            svg += `<rect width="${w}" height="${h}" fill="${fill}" stroke="${stroke}" stroke-width="${sw}"/>`;
+            svg += `<line x1="${inset}" y1="0" x2="${inset}" y2="${h}" stroke="${stroke}" stroke-width="${sw}"/>`;
+            svg += `<line x1="${w-inset}" y1="0" x2="${w-inset}" y2="${h}" stroke="${stroke}" stroke-width="${sw}"/>`;
+        }
+        else if (shape === 'star' || shape === 'pentagon' || shape === 'octagon') {
+            // Fallback for complex shapes
+            svg += `<ellipse cx="${w/2}" cy="${h/2}" rx="${w/2}" ry="${h/2}" fill="${fill}" stroke="${stroke}" stroke-width="${sw}"/>`;
+            DebugLogger.warning(`図形 "${shape}" は楕円で代替されました`);
+        }
         else {
+            // Default: Rectangle
             svg += `<rect width="${w}" height="${h}" rx="${rx}" fill="${fill}" stroke="${stroke}" stroke-width="${sw}"/>`;
         }
 
-        // Text rendering
+        // Improved text rendering
         if (elem.value) {
-            const text = decodeHtml(elem.value).replace(/<br\s*\/?>/gi, '\n').replace(/<[^>]+>/g, '');
-            if (text.trim()) {
-                const fs = parseFloat(elem.style.fontSize) || 12;
-                const fc = getColor(elem.style.fontColor, '#000000');
-                const fontWeight = elem.style.fontStyle === '1' || elem.style.bold === '1' ? 'bold' : 'normal';
-                const lines = text.split('\n').filter(l => l.trim());
-                const lh = fs * 1.3;
-                const startY = (h - lines.length * lh) / 2 + fs;
+            try {
+                let text = decodeHtml(elem.value);
 
-                lines.forEach((line, i) => {
-                    svg += `<text x="${w/2}" y="${startY + i*lh}" text-anchor="middle" font-family="sans-serif" font-size="${fs}" fill="${fc}" font-weight="${fontWeight}">${escapeXml(line.trim())}</text>`;
-                });
+                // Handle HTML content more robustly
+                text = text
+                    .replace(/<br\s*\/?>/gi, '\n')
+                    .replace(/<div[^>]*>/gi, '\n')
+                    .replace(/<\/div>/gi, '')
+                    .replace(/<p[^>]*>/gi, '\n')
+                    .replace(/<\/p>/gi, '')
+                    .replace(/<[^>]+>/g, '');
+
+                text = text.trim();
+
+                if (text) {
+                    const fs = parseFloat(elem.style.fontSize) || 12;
+                    const fc = getColor(elem.style.fontColor, '#000000');
+                    const fontStyle = elem.style.fontStyle || '0';
+                    const fontWeight = (fontStyle === '1' || fontStyle === '5' || elem.style.bold === '1') ? 'bold' : 'normal';
+                    const fontStyleAttr = (fontStyle === '2' || fontStyle === '6') ? 'italic' : 'normal';
+                    const textDecoration = (fontStyle === '4') ? 'underline' : 'none';
+
+                    const lines = text.split('\n').filter(l => l.trim());
+                    const lh = fs * 1.3;
+                    const totalHeight = lines.length * lh;
+                    const startY = (h - totalHeight) / 2 + fs;
+
+                    lines.forEach((line, i) => {
+                        svg += `<text x="${w/2}" y="${startY + i*lh}" text-anchor="middle" font-family="sans-serif" font-size="${fs}" fill="${fc}" font-weight="${fontWeight}" font-style="${fontStyleAttr}" text-decoration="${textDecoration}">${escapeXml(line.trim())}</text>`;
+                    });
+                }
+            } catch (e) {
+                DebugLogger.warning(`テキストレンダリングエラー: ${e.message}`);
             }
         }
 
@@ -548,7 +921,6 @@
         const srcShape = elem.source ? shapeMap[elem.source] : null;
         const tgtShape = elem.target ? shapeMap[elem.target] : null;
 
-        // Get shape absolute position and dimensions
         function getShapeBounds(shape) {
             if (!shape) return null;
             const x = shape.absX !== undefined ? shape.absX : shape.x;
@@ -558,7 +930,6 @@
             return { x, y, w, h, cx: x + w/2, cy: y + h/2 };
         }
 
-        // Get connection point using relative position (0-1) on shape boundary
         function getRelativePoint(shape, relX, relY) {
             const b = getShapeBounds(shape);
             if (!b) return null;
@@ -567,163 +938,6 @@
             return { x: b.x + b.w * rx, y: b.y + b.h * ry };
         }
 
-        // Determine side from relative coordinates (more precise)
-        function getSide(relX, relY) {
-            const rx = relX !== undefined ? parseFloat(relX) : 0.5;
-            const ry = relY !== undefined ? parseFloat(relY) : 0.5;
-
-            // Check corners and edges precisely
-            if (ry <= 0.01) return 'top';
-            if (ry >= 0.99) return 'bottom';
-            if (rx <= 0.01) return 'left';
-            if (rx >= 0.99) return 'right';
-
-            // For intermediate positions, determine dominant direction
-            const distTop = ry;
-            const distBottom = 1 - ry;
-            const distLeft = rx;
-            const distRight = 1 - rx;
-            const minDist = Math.min(distTop, distBottom, distLeft, distRight);
-
-            if (minDist === distTop) return 'top';
-            if (minDist === distBottom) return 'bottom';
-            if (minDist === distLeft) return 'left';
-            return 'right';
-        }
-
-        // Get direction vector for a side
-        function getSideDirection(side) {
-            switch(side) {
-                case 'top': return { dx: 0, dy: -1 };
-                case 'bottom': return { dx: 0, dy: 1 };
-                case 'left': return { dx: -1, dy: 0 };
-                case 'right': return { dx: 1, dy: 0 };
-                default: return { dx: 0, dy: 1 };
-            }
-        }
-
-        // Advanced orthogonal path generation
-        function generateOrthogonalPath(start, end, startSide, endSide, srcBounds, tgtBounds) {
-            const pts = [start];
-            const jetty = parseFloat(elem.style.jettySize) || 20;
-
-            const startDir = getSideDirection(startSide);
-            const endDir = getSideDirection(endSide);
-
-            // Calculate jet points (initial perpendicular segment)
-            const jetStart = {
-                x: start.x + startDir.dx * jetty,
-                y: start.y + startDir.dy * jetty
-            };
-            const jetEnd = {
-                x: end.x + endDir.dx * jetty,
-                y: end.y + endDir.dy * jetty
-            };
-
-            const dx = end.x - start.x;
-            const dy = end.y - start.y;
-            const midX = (start.x + end.x) / 2;
-            const midY = (start.y + end.y) / 2;
-
-            // Determine routing strategy based on sides
-            const isHorizontalStart = (startSide === 'left' || startSide === 'right');
-            const isHorizontalEnd = (endSide === 'left' || endSide === 'right');
-            const isVerticalStart = (startSide === 'top' || startSide === 'bottom');
-            const isVerticalEnd = (endSide === 'top' || endSide === 'bottom');
-
-            // Same side connections (U-shape routing)
-            if (startSide === endSide) {
-                const offset = jetty + 20;
-                if (startSide === 'top') {
-                    const minY = Math.min(start.y, end.y) - offset;
-                    pts.push({ x: start.x, y: minY });
-                    pts.push({ x: end.x, y: minY });
-                } else if (startSide === 'bottom') {
-                    const maxY = Math.max(start.y, end.y) + offset;
-                    pts.push({ x: start.x, y: maxY });
-                    pts.push({ x: end.x, y: maxY });
-                } else if (startSide === 'left') {
-                    const minX = Math.min(start.x, end.x) - offset;
-                    pts.push({ x: minX, y: start.y });
-                    pts.push({ x: minX, y: end.y });
-                } else if (startSide === 'right') {
-                    const maxX = Math.max(start.x, end.x) + offset;
-                    pts.push({ x: maxX, y: start.y });
-                    pts.push({ x: maxX, y: end.y });
-                }
-            }
-            // Opposite sides - simple routing
-            else if ((startSide === 'top' && endSide === 'bottom') ||
-                     (startSide === 'bottom' && endSide === 'top')) {
-                if (Math.abs(dx) > 1) {
-                    pts.push({ x: start.x, y: midY });
-                    pts.push({ x: end.x, y: midY });
-                }
-            }
-            else if ((startSide === 'left' && endSide === 'right') ||
-                     (startSide === 'right' && endSide === 'left')) {
-                if (Math.abs(dy) > 1) {
-                    pts.push({ x: midX, y: start.y });
-                    pts.push({ x: midX, y: end.y });
-                }
-            }
-            // Perpendicular sides (L-shape or S-shape routing)
-            else if (isVerticalStart && isHorizontalEnd) {
-                // Vertical start, horizontal end
-                const goingDown = (startSide === 'bottom');
-                const goingRight = (endSide === 'right');
-
-                // Check if direct L-shape works
-                const directY = end.y;
-                const validDirect = goingDown ? (directY >= start.y) : (directY <= start.y);
-
-                if (validDirect && Math.abs(directY - start.y) > 5) {
-                    // Simple L-shape
-                    pts.push({ x: start.x, y: end.y });
-                } else {
-                    // Need S-shape routing
-                    const offsetY = goingDown ? Math.max(end.y, start.y + jetty) : Math.min(end.y, start.y - jetty);
-                    pts.push({ x: start.x, y: offsetY });
-                    pts.push({ x: end.x + (goingRight ? jetty : -jetty), y: offsetY });
-                    pts.push({ x: end.x + (goingRight ? jetty : -jetty), y: end.y });
-                }
-            }
-            else if (isHorizontalStart && isVerticalEnd) {
-                // Horizontal start, vertical end
-                const goingRight = (startSide === 'right');
-                const goingDown = (endSide === 'bottom');
-
-                // Check if direct L-shape works
-                const directX = end.x;
-                const validDirect = goingRight ? (directX >= start.x) : (directX <= start.x);
-
-                if (validDirect && Math.abs(directX - start.x) > 5) {
-                    // Simple L-shape
-                    pts.push({ x: end.x, y: start.y });
-                } else {
-                    // Need S-shape routing
-                    const offsetX = goingRight ? Math.max(end.x, start.x + jetty) : Math.min(end.x, start.x - jetty);
-                    pts.push({ x: offsetX, y: start.y });
-                    pts.push({ x: offsetX, y: end.y + (goingDown ? jetty : -jetty) });
-                    pts.push({ x: end.x, y: end.y + (goingDown ? jetty : -jetty) });
-                }
-            }
-            // Default routing
-            else {
-                if (Math.abs(dx) >= Math.abs(dy)) {
-                    pts.push({ x: midX, y: start.y });
-                    pts.push({ x: midX, y: end.y });
-                } else {
-                    pts.push({ x: start.x, y: midY });
-                    pts.push({ x: end.x, y: midY });
-                }
-            }
-
-            pts.push(end);
-            return pts;
-        }
-
-        // Calculate edge intersection point from center towards target
         function getEdgeIntersection(shape, targetX, targetY) {
             const b = getShapeBounds(shape);
             if (!b || b.w === 0 || b.h === 0) return { x: b ? b.cx : 0, y: b ? b.cy : 0 };
@@ -747,131 +961,64 @@
             return { x: b.cx + dx * t, y: b.cy + dy * t };
         }
 
-        // Detect side from intersection point
-        function detectSideFromPoint(bounds, point) {
-            if (!bounds || !point) return 'bottom';
-            const dx = point.x - bounds.cx;
-            const dy = point.y - bounds.cy;
-            const hw = bounds.w / 2;
-            const hh = bounds.h / 2;
-
-            // Normalize to determine dominant direction
-            const normX = hw > 0 ? Math.abs(dx) / hw : 0;
-            const normY = hh > 0 ? Math.abs(dy) / hh : 0;
-
-            if (normX > normY) {
-                return dx > 0 ? 'right' : 'left';
-            } else {
-                return dy > 0 ? 'bottom' : 'top';
-            }
-        }
-
-        // Check edge styles
-        const edgeStyle = elem.style.edgeStyle || '';
-        const isOrthogonal = elem.styleStr.includes('edgeStyle=orthogonalEdgeStyle') ||
-                            elem.styleStr.includes('edgeStyle=elbowEdgeStyle') ||
-                            elem.styleStr.includes('edgeStyle=segmentEdgeStyle') ||
-                            edgeStyle === 'orthogonalEdgeStyle' ||
-                            edgeStyle === 'elbowEdgeStyle' ||
-                            edgeStyle === 'segmentEdgeStyle';
-
-        const isEntityRelation = elem.styleStr.includes('edgeStyle=entityRelationEdgeStyle') ||
-                                 edgeStyle === 'entityRelationEdgeStyle';
-
-        // Collect waypoints from Array
         const waypoints = elem.points.filter(p => {
             if (p.as === 'sourcePoint' || p.as === 'targetPoint' || p.as === 'offset') return false;
             return !isNaN(p.x) && !isNaN(p.y);
         });
 
-        // Get source bounds
         const srcBounds = srcShape ? getShapeBounds(srcShape) : null;
         const tgtBounds = tgtShape ? getShapeBounds(tgtShape) : null;
 
-        // === DETERMINE START POINT ===
         let startPt = null;
-        let startSide = 'bottom';
+        let endPt = null;
 
-        // Priority 1: exitX/exitY on source shape (most reliable)
+        // Determine start point
         if (srcShape && (elem.style.exitX !== undefined || elem.style.exitY !== undefined)) {
             startPt = getRelativePoint(srcShape, elem.style.exitX, elem.style.exitY);
-            startSide = getSide(elem.style.exitX, elem.style.exitY);
-        }
-        // Priority 2: Explicit sourcePoint
-        else {
+        } else {
             const srcPtData = elem.points.find(p => p.as === 'sourcePoint');
             if (srcPtData && !isNaN(srcPtData.x) && !isNaN(srcPtData.y)) {
                 startPt = { x: srcPtData.x, y: srcPtData.y };
-                if (srcBounds) {
-                    startSide = detectSideFromPoint(srcBounds, startPt);
+            } else if (srcShape) {
+                if (tgtBounds) {
+                    startPt = getEdgeIntersection(srcShape, tgtBounds.cx, tgtBounds.cy);
+                } else if (waypoints.length > 0) {
+                    startPt = getEdgeIntersection(srcShape, waypoints[0].x, waypoints[0].y);
+                } else {
+                    startPt = { x: srcBounds.cx, y: srcBounds.y + srcBounds.h };
                 }
             }
         }
-        // Priority 3: Calculate from source shape
-        if (!startPt && srcShape) {
-            if (tgtBounds) {
-                startPt = getEdgeIntersection(srcShape, tgtBounds.cx, tgtBounds.cy);
-                startSide = detectSideFromPoint(srcBounds, startPt);
-            } else if (waypoints.length > 0) {
-                startPt = getEdgeIntersection(srcShape, waypoints[0].x, waypoints[0].y);
-                startSide = detectSideFromPoint(srcBounds, startPt);
-            } else {
-                startPt = { x: srcBounds.cx, y: srcBounds.y + srcBounds.h };
-                startSide = 'bottom';
-            }
-        }
 
-        // === DETERMINE END POINT ===
-        let endPt = null;
-        let endSide = 'top';
-
-        // Priority 1: entryX/entryY on target shape (most reliable)
+        // Determine end point
         if (tgtShape && (elem.style.entryX !== undefined || elem.style.entryY !== undefined)) {
             endPt = getRelativePoint(tgtShape, elem.style.entryX, elem.style.entryY);
-            endSide = getSide(elem.style.entryX, elem.style.entryY);
-        }
-        // Priority 2: Explicit targetPoint
-        else {
+        } else {
             const tgtPtData = elem.points.find(p => p.as === 'targetPoint');
             if (tgtPtData && !isNaN(tgtPtData.x) && !isNaN(tgtPtData.y)) {
                 endPt = { x: tgtPtData.x, y: tgtPtData.y };
-                if (tgtBounds) {
-                    endSide = detectSideFromPoint(tgtBounds, endPt);
+            } else if (tgtShape) {
+                if (srcBounds) {
+                    endPt = getEdgeIntersection(tgtShape, srcBounds.cx, srcBounds.cy);
+                } else if (startPt) {
+                    endPt = getEdgeIntersection(tgtShape, startPt.x, startPt.y);
+                } else if (waypoints.length > 0) {
+                    const lastWp = waypoints[waypoints.length - 1];
+                    endPt = getEdgeIntersection(tgtShape, lastWp.x, lastWp.y);
+                } else {
+                    endPt = { x: tgtBounds.cx, y: tgtBounds.y };
                 }
             }
         }
-        // Priority 3: Calculate from target shape
-        if (!endPt && tgtShape) {
-            if (srcBounds) {
-                endPt = getEdgeIntersection(tgtShape, srcBounds.cx, srcBounds.cy);
-                endSide = detectSideFromPoint(tgtBounds, endPt);
-            } else if (startPt) {
-                endPt = getEdgeIntersection(tgtShape, startPt.x, startPt.y);
-                endSide = detectSideFromPoint(tgtBounds, endPt);
-            } else if (waypoints.length > 0) {
-                const lastWp = waypoints[waypoints.length - 1];
-                endPt = getEdgeIntersection(tgtShape, lastWp.x, lastWp.y);
-                endSide = detectSideFromPoint(tgtBounds, endPt);
-            } else {
-                endPt = { x: tgtBounds.cx, y: tgtBounds.y };
-                endSide = 'top';
-            }
-        }
 
-        // === BUILD PATH POINTS ===
+        // Build points array
         let pts = [];
-
         if (startPt && endPt) {
             if (waypoints.length > 0) {
-                // Use explicit waypoints
                 pts.push(startPt);
                 waypoints.forEach(p => pts.push({ x: p.x, y: p.y }));
                 pts.push(endPt);
-            } else if (isOrthogonal || isEntityRelation) {
-                // Generate orthogonal path with advanced routing
-                pts = generateOrthogonalPath(startPt, endPt, startSide, endSide, srcBounds, tgtBounds);
             } else {
-                // Direct line
                 pts.push(startPt);
                 pts.push(endPt);
             }
@@ -882,15 +1029,16 @@
             waypoints.forEach(p => pts.push({ x: p.x, y: p.y }));
             pts.push(endPt);
         } else {
-            // Fallback: use all available points
             const allPts = elem.points.filter(p => p.as !== 'offset' && !isNaN(p.x) && !isNaN(p.y));
             if (allPts.length >= 2) {
                 pts = allPts.map(p => ({ x: p.x, y: p.y }));
             }
         }
 
-        // Cannot draw with less than 2 points
-        if (pts.length < 2) return '';
+        if (pts.length < 2) {
+            DebugLogger.warning(`エッジのポイントが不足しています (ID: ${elem.id})`);
+            return '';
+        }
 
         // Remove consecutive duplicates
         pts = pts.filter((p, i) => i === 0 || Math.abs(p.x - pts[i-1].x) > 0.5 || Math.abs(p.y - pts[i-1].y) > 0.5);
@@ -899,7 +1047,6 @@
         // Build SVG path
         let d;
         if (curved && pts.length > 2) {
-            // Curved path using quadratic bezier
             d = `M${pts[0].x.toFixed(1)},${pts[0].y.toFixed(1)}`;
             for (let i = 1; i < pts.length - 1; i++) {
                 const curr = pts[i];
@@ -911,7 +1058,6 @@
             const last = pts[pts.length - 1];
             d += ` L${last.x.toFixed(1)},${last.y.toFixed(1)}`;
         } else if (rounded && pts.length > 2) {
-            // Rounded corners
             const radius = 5;
             d = `M${pts[0].x.toFixed(1)},${pts[0].y.toFixed(1)}`;
             for (let i = 1; i < pts.length - 1; i++) {
@@ -919,7 +1065,6 @@
                 const curr = pts[i];
                 const next = pts[i + 1];
 
-                // Calculate vectors
                 const v1x = curr.x - prev.x, v1y = curr.y - prev.y;
                 const v2x = next.x - curr.x, v2y = next.y - curr.y;
                 const len1 = Math.sqrt(v1x * v1x + v1y * v1y);
@@ -940,7 +1085,6 @@
             }
             d += ` L${pts[pts.length - 1].x.toFixed(1)},${pts[pts.length - 1].y.toFixed(1)}`;
         } else {
-            // Standard polyline
             d = `M${pts[0].x.toFixed(1)},${pts[0].y.toFixed(1)}`;
             for (let i = 1; i < pts.length; i++) {
                 d += ` L${pts[i].x.toFixed(1)},${pts[i].y.toFixed(1)}`;
@@ -950,10 +1094,8 @@
         let svg = '';
         const markerId = `m_${elem.id || Math.random().toString(36).substr(2, 6)}`;
 
-        // Arrow markers - check for default classic arrow
         const endArrow = elem.style.endArrow;
         const startArrow = elem.style.startArrow;
-        // Default to classic arrow if not explicitly set to none
         const hasEndArrow = endArrow !== 'none' && endArrow !== '0';
         const hasStartArrow = startArrow && startArrow !== 'none' && startArrow !== '0';
 
@@ -1000,47 +1142,54 @@
 
         // Edge label
         if (elem.value) {
-            const text = decodeHtml(elem.value).replace(/<[^>]+>/g, '').trim();
-            if (text) {
-                // Find label position - consider offset
-                const offsetData = elem.points.find(p => p.as === 'offset');
-                let labelX, labelY;
+            try {
+                const text = decodeHtml(elem.value).replace(/<[^>]+>/g, '').trim();
+                if (text) {
+                    const offsetData = elem.points.find(p => p.as === 'offset');
+                    let labelX, labelY;
 
-                const midIdx = Math.floor(pts.length / 2);
-                const p1 = pts[Math.max(0, midIdx - 1)];
-                const p2 = pts[Math.min(pts.length - 1, midIdx)];
-                labelX = (p1.x + p2.x) / 2;
-                labelY = (p1.y + p2.y) / 2;
+                    const midIdx = Math.floor(pts.length / 2);
+                    const p1 = pts[Math.max(0, midIdx - 1)];
+                    const p2 = pts[Math.min(pts.length - 1, midIdx)];
+                    labelX = (p1.x + p2.x) / 2;
+                    labelY = (p1.y + p2.y) / 2;
 
-                if (offsetData && !isNaN(offsetData.x) && !isNaN(offsetData.y)) {
-                    labelX += offsetData.x;
-                    labelY += offsetData.y;
+                    if (offsetData && !isNaN(offsetData.x) && !isNaN(offsetData.y)) {
+                        labelX += offsetData.x;
+                        labelY += offsetData.y;
+                    }
+
+                    const fs = parseFloat(elem.style.fontSize) || 11;
+                    const fc = getColor(elem.style.fontColor, '#000000');
+                    const textWidth = text.length * fs * 0.55;
+                    const textHeight = fs * 1.3;
+
+                    svg += `<rect x="${labelX - textWidth/2 - 2}" y="${labelY - textHeight/2}" width="${textWidth + 4}" height="${textHeight}" fill="white" fill-opacity="0.9" rx="2"/>`;
+                    svg += `<text x="${labelX}" y="${labelY + fs * 0.35}" text-anchor="middle" font-family="sans-serif" font-size="${fs}" fill="${fc}">${escapeXml(text)}</text>`;
                 }
-
-                const fs = parseFloat(elem.style.fontSize) || 11;
-                const fc = getColor(elem.style.fontColor, '#000000');
-
-                // Calculate text width more accurately
-                const textWidth = text.length * fs * 0.55;
-                const textHeight = fs * 1.3;
-
-                svg += `<rect x="${labelX - textWidth/2 - 2}" y="${labelY - textHeight/2}" width="${textWidth + 4}" height="${textHeight}" fill="white" fill-opacity="0.9" rx="2"/>`;
-                svg += `<text x="${labelX}" y="${labelY + fs * 0.35}" text-anchor="middle" font-family="sans-serif" font-size="${fs}" fill="${fc}">${escapeXml(text)}</text>`;
+            } catch (e) {
+                DebugLogger.warning(`エッジラベルレンダリングエラー: ${e.message}`);
             }
         }
 
         return svg;
     }
 
-    // File handling
+    // ========== File handling ==========
     async function handleFile(file) {
         currentFile = file;
         showLoading('ファイルを読み込み中...');
+        DebugLogger.clear();
+        DebugLogger.info(`========== 新しいファイル処理開始 ==========`);
+        DebugLogger.info(`ファイル名: ${file.name}`);
+        DebugLogger.info(`ファイルサイズ: ${formatBytes(file.size)}`);
+        DebugLogger.info(`ファイルタイプ: ${file.type || '不明'}`);
 
         try {
             const content = await file.text();
 
             if (file.name.toLowerCase().endsWith('.svg')) {
+                DebugLogger.info('SVGファイルとして処理');
                 currentSvgContent = content;
                 diagrams = [{ name: file.name.replace(/\.svg$/i, ''), svg: content }];
             } else {
@@ -1070,14 +1219,31 @@
             previewCard.style.display = 'block';
             exportCard.style.display = 'block';
             hideLoading();
-            showMessage('ファイルを読み込みました');
+
+            if (renderErrors.length > 0) {
+                showMessage(`読み込み完了 (${renderErrors.length} 件の警告あり)`, 'warning');
+            } else {
+                showMessage('ファイルを読み込みました');
+            }
 
         } catch (err) {
             hideLoading();
             console.error(err);
+            DebugLogger.error(`ファイル処理エラー: ${err.message}`);
+            DebugLogger.error(`スタックトレース: ${err.stack}`);
             previewCard.style.display = 'block';
-            previewArea.innerHTML = `<div style="color:#ef4444;padding:16px;"><strong>エラー:</strong> ${err.message}</div>`;
+            previewArea.innerHTML = `<div style="color:#ef4444;padding:16px;text-align:left;">
+                <strong>エラー:</strong> ${escapeXml(err.message)}
+                <br><br>
+                <strong>対処方法:</strong>
+                <ul style="margin-top:8px; padding-left:20px;">
+                    <li>ファイルが正しいDrawio形式かどうか確認してください</li>
+                    <li>ファイルが破損していないか確認してください</li>
+                    <li>デバッグコンソールで詳細情報を確認してください</li>
+                </ul>
+            </div>`;
             showMessage(err.message, 'error');
+            debugDownloadBtn.style.display = 'block';
         }
     }
 
@@ -1085,25 +1251,44 @@
         selectedPageIndex = index;
         pageList.querySelectorAll('.page-btn').forEach((btn, i) => btn.classList.toggle('selected', i === index));
 
+        DebugLogger.info(`========== ページ ${index + 1} を選択 ==========`);
         const page = diagrams[index];
-        if (page.svg) {
-            currentSvgContent = page.svg;
-        } else if (page.model) {
-            const result = renderToSvg(page.model);
-            currentSvgContent = result.svg;
-        }
 
-        const blob = new Blob([currentSvgContent], { type: 'image/svg+xml' });
-        const url = URL.createObjectURL(blob);
-        previewArea.innerHTML = `<img src="${url}" alt="Preview">`;
+        try {
+            if (page.svg) {
+                currentSvgContent = page.svg;
+            } else if (page.model) {
+                const result = renderToSvg(page.model);
+                currentSvgContent = result.svg;
+            }
+
+            const blob = new Blob([currentSvgContent], { type: 'image/svg+xml' });
+            const url = URL.createObjectURL(blob);
+            previewArea.innerHTML = `<img src="${url}" alt="Preview">`;
+
+            if (renderErrors.length > 0) {
+                showMessage(`レンダリング完了 (${renderErrors.length} 件の警告あり)`, 'warning');
+            }
+        } catch (err) {
+            DebugLogger.error(`ページ選択エラー: ${err.message}`);
+            previewArea.innerHTML = `<div style="color:#ef4444;padding:16px;">
+                <strong>プレビューエラー:</strong> ${escapeXml(err.message)}
+            </div>`;
+            showMessage('プレビューの生成に失敗しました', 'error');
+        }
     }
 
     function exportFile() {
         if (!currentSvgContent) return;
+
+        DebugLogger.info(`========== エクスポート開始 ==========`);
+        DebugLogger.info(`形式: ${selectedFormat}`);
+
         const baseName = currentFile.name.replace(/\.(drawio|xml|svg)$/i, '');
 
         if (selectedFormat === 'svg') {
             downloadBlob(new Blob([currentSvgContent], { type: 'image/svg+xml' }), `${baseName}.svg`);
+            DebugLogger.success('SVGエクスポート完了');
         } else {
             exportAsPng(baseName);
         }
@@ -1111,27 +1296,40 @@
 
     function exportAsPng(baseName) {
         showLoading('PNG生成中...');
+        DebugLogger.info(`PNG生成開始: スケール ${pngScale}x`);
+
         const blob = new Blob([currentSvgContent], { type: 'image/svg+xml' });
         const url = URL.createObjectURL(blob);
         const img = new Image();
 
         img.onload = () => {
-            const canvas = document.createElement('canvas');
-            canvas.width = img.width * pngScale;
-            canvas.height = img.height * pngScale;
-            const ctx = canvas.getContext('2d');
-            ctx.fillStyle = 'white';
-            ctx.fillRect(0, 0, canvas.width, canvas.height);
-            ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+            try {
+                const canvas = document.createElement('canvas');
+                canvas.width = img.width * pngScale;
+                canvas.height = img.height * pngScale;
+                DebugLogger.info(`キャンバスサイズ: ${canvas.width} x ${canvas.height}`);
 
-            canvas.toBlob(pngBlob => {
-                downloadBlob(pngBlob, `${baseName}.png`);
+                const ctx = canvas.getContext('2d');
+                ctx.fillStyle = 'white';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+                ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+
+                canvas.toBlob(pngBlob => {
+                    downloadBlob(pngBlob, `${baseName}.png`);
+                    URL.revokeObjectURL(url);
+                    hideLoading();
+                    DebugLogger.success('PNG生成完了');
+                }, 'image/png');
+            } catch (err) {
+                DebugLogger.error(`PNG生成エラー: ${err.message}`);
                 URL.revokeObjectURL(url);
                 hideLoading();
-            }, 'image/png');
+                showMessage('PNG生成に失敗しました', 'error');
+            }
         };
 
-        img.onerror = () => {
+        img.onerror = (e) => {
+            DebugLogger.error(`画像読み込みエラー: ${e}`);
             URL.revokeObjectURL(url);
             hideLoading();
             showMessage('PNG生成に失敗しました', 'error');
@@ -1152,13 +1350,26 @@
         showMessage(`${filename} をダウンロード`);
     }
 
-    // Event handlers
+    // ========== Event handlers ==========
     dropZone.onclick = () => fileInput.click();
-    fileInput.onchange = e => { if (e.target.files[0]) handleFile(e.target.files[0]); e.target.value = ''; };
+    fileInput.onchange = e => {
+        if (e.target.files[0]) handleFile(e.target.files[0]);
+        e.target.value = '';
+    };
 
     // Global drag & drop
-    document.addEventListener('dragover', e => { e.preventDefault(); e.stopPropagation(); dropZone.classList.add('active'); }, false);
-    document.addEventListener('dragleave', e => { e.preventDefault(); e.stopPropagation(); dropZone.classList.remove('active'); }, false);
+    document.addEventListener('dragover', e => {
+        e.preventDefault();
+        e.stopPropagation();
+        dropZone.classList.add('active');
+    }, false);
+
+    document.addEventListener('dragleave', e => {
+        e.preventDefault();
+        e.stopPropagation();
+        dropZone.classList.remove('active');
+    }, false);
+
     document.addEventListener('drop', e => {
         e.preventDefault();
         e.stopPropagation();
@@ -1170,6 +1381,7 @@
             handleFile(file);
         }
     }, false);
+
     window.addEventListener('dragenter', e => e.preventDefault(), false);
 
     document.querySelectorAll('.option-btn').forEach(btn => {
@@ -1181,9 +1393,42 @@
         };
     });
 
-    scaleSlider.oninput = () => { pngScale = parseInt(scaleSlider.value); scaleValue.textContent = `${pngScale}x`; };
+    scaleSlider.oninput = () => {
+        pngScale = parseInt(scaleSlider.value);
+        scaleValue.textContent = `${pngScale}x`;
+    };
+
     exportBtn.onclick = exportFile;
-    fileInfo.onclick = () => { dropZone.style.display = 'block'; fileInfo.style.display = 'none'; fileInput.click(); };
+    debugDownloadBtn.onclick = () => DebugLogger.downloadLogs();
+    fileInfo.onclick = () => {
+        dropZone.style.display = 'block';
+        fileInfo.style.display = 'none';
+        fileInput.click();
+    };
+
+    // Debug console controls
+    debugToggle.onclick = () => {
+        if (debugConsole.classList.contains('collapsed')) {
+            debugConsole.classList.remove('collapsed');
+            debugToggle.textContent = '折りたたむ';
+        } else {
+            debugConsole.classList.add('collapsed');
+            debugToggle.textContent = '展開';
+        }
+    };
+
+    debugHeader.onclick = (e) => {
+        if (e.target.tagName !== 'BUTTON') {
+            debugToggle.click();
+        }
+    };
+
+    debugClear.onclick = (e) => {
+        e.stopPropagation();
+        DebugLogger.clear();
+    };
+
+    DebugLogger.info('アプリケーション初期化完了');
 
 })();
 </script>
