@@ -511,13 +511,55 @@
             svg += renderShape(elem);
         });
 
-        // Render edges
+        // Render edges (paths first, labels collected for de-confliction)
+        const edgeLabels = [];
         edges.forEach(elem => {
-            svg += renderEdge(elem, shapeMap);
+            const r = renderEdge(elem, shapeMap);
+            svg += r.svg;
+            if (r.label) edgeLabels.push(r.label);
         });
+        // Resolve overlapping edge labels, then draw them on top of the paths
+        svg += renderEdgeLabels(edgeLabels);
 
         svg += '</g></svg>';
         return { svg, width, height };
+    }
+
+    // Nudge overlapping edge labels apart, then emit their boxes + text.
+    // Labels on a horizontal edge segment move vertically; on a vertical
+    // segment they move horizontally, so each stays close to its edge.
+    function renderEdgeLabels(labels) {
+        const overlaps = (a, b) => !(a.x + a.w <= b.x || b.x + b.w <= a.x ||
+                                     a.y + a.h <= b.y || b.y + b.h <= a.y);
+        const placed = [];
+        labels.forEach(lb => {
+            const gap = 2;
+            const stepV = lb.h + gap;
+            const stepH = lb.w * 0.6 + gap;
+            // Try the natural position first, then alternate offsets outward
+            let best = { x: lb.x, y: lb.y };
+            for (let k = 0; k < 60; k++) {
+                const sign = (k % 2 === 0) ? 1 : -1;
+                const mag = Math.ceil(k / 2);
+                const cand = lb.horizontal
+                    ? { x: lb.x, y: lb.y + sign * mag * stepV }
+                    : { x: lb.x + sign * mag * stepH, y: lb.y };
+                const rect = { x: cand.x, y: cand.y, w: lb.w, h: lb.h };
+                if (!placed.some(p => overlaps(rect, p))) { best = cand; break; }
+                if (k === 59) best = cand; // give up: use last candidate
+            }
+            const rect = { x: best.x, y: best.y, w: lb.w, h: lb.h };
+            placed.push(rect);
+            const cx = best.x + lb.w / 2;
+            const cy = best.y + lb.h / 2;
+            let out = '';
+            if (lb.bg !== 'none') {
+                out += `<rect x="${best.x.toFixed(1)}" y="${best.y.toFixed(1)}" width="${lb.w.toFixed(1)}" height="${lb.h.toFixed(1)}" fill="${lb.bg}" fill-opacity="0.9" rx="2"/>`;
+            }
+            out += `<text x="${cx.toFixed(1)}" y="${(cy + lb.fs * 0.35).toFixed(1)}" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="${lb.fs}" fill="${lb.fc}">${escapeXml(lb.text)}</text>`;
+            lb._svg = out;
+        });
+        return placed.map((p, i) => labels[i]._svg).join('');
     }
 
     function renderShape(elem) {
@@ -1089,11 +1131,11 @@
         }
 
         // Cannot draw with less than 2 points
-        if (pts.length < 2) return '';
+        if (pts.length < 2) return { svg: '', label: null };
 
         // Remove consecutive duplicates
         pts = pts.filter((p, i) => i === 0 || Math.abs(p.x - pts[i-1].x) > 0.5 || Math.abs(p.y - pts[i-1].y) > 0.5);
-        if (pts.length < 2) return '';
+        if (pts.length < 2) return { svg: '', label: null };
 
         // Build SVG path
         let d;
@@ -1197,19 +1239,21 @@
 
         svg += `<path d="${d}" fill="none" stroke="${stroke}" stroke-width="${sw}" ${dashed}${markers}/>`;
 
-        // Edge label
+        // Edge label — return its placement so overlaps can be resolved globally
+        let label = null;
         if (elem.value) {
             const text = htmlLabelToText(elem.value).replace(/\n+/g, ' ').trim();
             if (text) {
                 // Find label position - consider offset
                 const offsetData = elem.points.find(p => p.as === 'offset');
-                let labelX, labelY;
 
                 const midIdx = Math.floor(pts.length / 2);
                 const p1 = pts[Math.max(0, midIdx - 1)];
                 const p2 = pts[Math.min(pts.length - 1, midIdx)];
-                labelX = (p1.x + p2.x) / 2;
-                labelY = (p1.y + p2.y) / 2;
+                let labelX = (p1.x + p2.x) / 2;
+                let labelY = (p1.y + p2.y) / 2;
+                // Orientation of the segment the label sits on
+                const horizontal = Math.abs(p2.x - p1.x) >= Math.abs(p2.y - p1.y);
 
                 if (offsetData && !isNaN(offsetData.x) && !isNaN(offsetData.y)) {
                     labelX += offsetData.x;
@@ -1219,19 +1263,17 @@
                 const fs = parseFloat(elem.style.fontSize) || 11;
                 const fc = getColor(elem.style.fontColor, '#000000');
                 const labelBg = getColor(elem.style.labelBackgroundColor, 'white');
+                const boxW = measureText(text, fs) + 6;
+                const boxH = fs * 1.3;
 
-                // CJK-aware text width for a snug background box
-                const textWidth = measureText(text, fs);
-                const textHeight = fs * 1.3;
-
-                if (labelBg !== 'none') {
-                    svg += `<rect x="${(labelX - textWidth/2 - 3).toFixed(1)}" y="${(labelY - textHeight/2).toFixed(1)}" width="${(textWidth + 6).toFixed(1)}" height="${textHeight.toFixed(1)}" fill="${labelBg}" fill-opacity="0.9" rx="2"/>`;
-                }
-                svg += `<text x="${labelX.toFixed(1)}" y="${(labelY + fs * 0.35).toFixed(1)}" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="${fs}" fill="${fc}">${escapeXml(text)}</text>`;
+                label = {
+                    x: labelX - boxW / 2, y: labelY - boxH / 2,
+                    w: boxW, h: boxH, text, fs, fc, bg: labelBg, horizontal
+                };
             }
         }
 
-        return svg;
+        return { svg, label };
     }
 
     // File handling
