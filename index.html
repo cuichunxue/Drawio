@@ -523,48 +523,55 @@
 
         const styleStr = elem.styleStr || '';
         const shape = elem.style.shape || '';
+        // Match a primitive shape whether written as shape=<name> or as a bare style key
+        const is = name => shape === name || elem.style[name] === true || elem.style[name] === '1';
+        const isText = elem.style.text === true || shape === 'text';
+        const isStencil = shape.indexOf('mxgraph.') === 0 || shape.indexOf('.') > 0;
 
+        // Text-only shape (text;html=1) — no background, label only
+        if (isText) {
+            /* borderless: nothing to draw here, label handled below */
+        }
         // Image shape (shape=image;image=<url|dataURI>)
-        if ((shape === 'image' || styleStr.includes('shape=image')) && elem.style.image) {
+        else if (shape === 'image' && elem.style.image) {
             const href = String(elem.style.image).replace(/&/g, '&amp;').replace(/"/g, '&quot;');
             const aspect = elem.style.imageAspect === '0' ? 'none' : 'xMidYMid meet';
             svg += `<image x="0" y="0" width="${w}" height="${h}" preserveAspectRatio="${aspect}" href="${href}" xlink:href="${href}"/>`;
         }
         // Cylinder detection
-        else if (shape === 'cylinder' || shape === 'cylinder3' ||
-            styleStr.includes('shape=cylinder')) {
+        else if (is('cylinder') || shape === 'cylinder3') {
             const arcH = Math.min(h * 0.15, 20);
             svg += `<path d="M0,${arcH} C0,${arcH/2} ${w/4},0 ${w/2},0 C${w*3/4},0 ${w},${arcH/2} ${w},${arcH} L${w},${h-arcH} C${w},${h-arcH/2} ${w*3/4},${h} ${w/2},${h} C${w/4},${h} 0,${h-arcH/2} 0,${h-arcH} Z" fill="${fill}" stroke="${stroke}" stroke-width="${sw}"/>`;
             svg += `<path d="M0,${arcH} C0,${arcH*1.5} ${w/4},${arcH*2} ${w/2},${arcH*2} C${w*3/4},${arcH*2} ${w},${arcH*1.5} ${w},${arcH}" fill="none" stroke="${stroke}" stroke-width="${sw}"/>`;
         }
         // Ellipse/Circle
-        else if (elem.style.ellipse === '1' || shape === 'ellipse' || styleStr.includes('ellipse')) {
+        else if (is('ellipse')) {
             svg += `<ellipse cx="${w/2}" cy="${h/2}" rx="${w/2}" ry="${h/2}" fill="${fill}" stroke="${stroke}" stroke-width="${sw}"${dash}/>`;
         }
         // Diamond/Rhombus
-        else if (elem.style.rhombus === '1' || shape === 'rhombus' || styleStr.includes('rhombus')) {
+        else if (is('rhombus')) {
             svg += `<polygon points="${w/2},0 ${w},${h/2} ${w/2},${h} 0,${h/2}" fill="${fill}" stroke="${stroke}" stroke-width="${sw}"${dash}/>`;
         }
         // Triangle
-        else if (shape === 'triangle' || styleStr.includes('triangle')) {
-            svg += `<polygon points="${w/2},0 ${w},${h} 0,${h}" fill="${fill}" stroke="${stroke}" stroke-width="${sw}"/>`;
+        else if (is('triangle')) {
+            svg += `<polygon points="${w/2},0 ${w},${h} 0,${h}" fill="${fill}" stroke="${stroke}" stroke-width="${sw}"${dash}/>`;
         }
         // Hexagon
-        else if (shape === 'hexagon' || styleStr.includes('hexagon')) {
+        else if (is('hexagon')) {
             const inset = w * 0.25;
-            svg += `<polygon points="${inset},0 ${w-inset},0 ${w},${h/2} ${w-inset},${h} ${inset},${h} 0,${h/2}" fill="${fill}" stroke="${stroke}" stroke-width="${sw}"/>`;
+            svg += `<polygon points="${inset},0 ${w-inset},0 ${w},${h/2} ${w-inset},${h} ${inset},${h} 0,${h/2}" fill="${fill}" stroke="${stroke}" stroke-width="${sw}"${dash}/>`;
         }
-        // Cloud
-        else if (shape === 'cloud' || styleStr.includes('cloud')) {
-            svg += `<path d="M${w*0.25},${h*0.8} C${w*0.05},${h*0.8} 0,${h*0.6} ${w*0.1},${h*0.45} C${w*0.05},${h*0.3} ${w*0.15},${h*0.15} ${w*0.3},${h*0.2} C${w*0.35},${h*0.05} ${w*0.5},0 ${w*0.65},${h*0.1} C${w*0.8},0 ${w*0.95},${h*0.15} ${w*0.9},${h*0.35} C${w},${h*0.45} ${w},${h*0.65} ${w*0.85},${h*0.75} C${w*0.9},${h*0.9} ${w*0.75},${h} ${w*0.6},${h*0.95} C${w*0.5},${h} ${w*0.35},${h} ${w*0.25},${h*0.8} Z" fill="${fill}" stroke="${stroke}" stroke-width="${sw}"/>`;
+        // Cloud (exact shape match only — avoids matching cloudfront/cloudwatch/etc.)
+        else if (is('cloud')) {
+            svg += `<path d="M${w*0.25},${h*0.8} C${w*0.05},${h*0.8} 0,${h*0.6} ${w*0.1},${h*0.45} C${w*0.05},${h*0.3} ${w*0.15},${h*0.15} ${w*0.3},${h*0.2} C${w*0.35},${h*0.05} ${w*0.5},0 ${w*0.65},${h*0.1} C${w*0.8},0 ${w*0.95},${h*0.15} ${w*0.9},${h*0.35} C${w},${h*0.45} ${w},${h*0.65} ${w*0.85},${h*0.75} C${w*0.9},${h*0.9} ${w*0.75},${h} ${w*0.6},${h*0.95} C${w*0.5},${h} ${w*0.35},${h} ${w*0.25},${h*0.8} Z" fill="${fill}" stroke="${stroke}" stroke-width="${sw}"${dash}/>`;
         }
         // Parallelogram
-        else if (shape === 'parallelogram' || styleStr.includes('parallelogram')) {
+        else if (is('parallelogram')) {
             const skew = w * 0.2;
-            svg += `<polygon points="${skew},0 ${w},0 ${w-skew},${h} 0,${h}" fill="${fill}" stroke="${stroke}" stroke-width="${sw}"/>`;
+            svg += `<polygon points="${skew},0 ${w},0 ${w-skew},${h} 0,${h}" fill="${fill}" stroke="${stroke}" stroke-width="${sw}"${dash}/>`;
         }
         // Actor (stick figure)
-        else if (shape === 'actor' || shape === 'umlActor' || styleStr.includes('shape=actor') || styleStr.includes('shape=umlActor')) {
+        else if (is('actor') || shape === 'umlActor') {
             const headR = Math.min(w, h) * 0.15;
             const centerX = w / 2;
             svg += `<circle cx="${centerX}" cy="${headR}" r="${headR}" fill="${fill}" stroke="${stroke}" stroke-width="${sw}"/>`;
@@ -574,37 +581,48 @@
             svg += `<line x1="${centerX}" y1="${h*0.6}" x2="${w}" y2="${h}" stroke="${stroke}" stroke-width="${sw}"/>`;
         }
         // Document
-        else if (shape === 'document' || styleStr.includes('shape=document')) {
+        else if (is('document')) {
             const wave = h * 0.1;
-            svg += `<path d="M0,0 L${w},0 L${w},${h-wave} Q${w*0.75},${h} ${w/2},${h-wave} Q${w*0.25},${h-wave*2} 0,${h-wave} Z" fill="${fill}" stroke="${stroke}" stroke-width="${sw}"/>`;
+            svg += `<path d="M0,0 L${w},0 L${w},${h-wave} Q${w*0.75},${h} ${w/2},${h-wave} Q${w*0.25},${h-wave*2} 0,${h-wave} Z" fill="${fill}" stroke="${stroke}" stroke-width="${sw}"${dash}/>`;
         }
         // Note
-        else if (shape === 'note' || styleStr.includes('shape=note')) {
+        else if (is('note')) {
             const fold = Math.min(w, h) * 0.2;
             svg += `<polygon points="0,0 ${w-fold},0 ${w},${fold} ${w},${h} 0,${h}" fill="${fill}" stroke="${stroke}" stroke-width="${sw}"${dash}/>`;
             svg += `<polyline points="${w-fold},0 ${w-fold},${fold} ${w},${fold}" fill="none" stroke="${stroke}" stroke-width="${sw}"/>`;
         }
         // Process (rectangle with inner vertical bars)
-        else if (shape === 'process' || styleStr.includes('shape=process')) {
+        else if (is('process')) {
             const inset = Math.min(w * 0.1, 12);
             svg += `<rect width="${w}" height="${h}" rx="${rx}" fill="${fill}" stroke="${stroke}" stroke-width="${sw}"${dash}/>`;
             svg += `<line x1="${inset}" y1="0" x2="${inset}" y2="${h}" stroke="${stroke}" stroke-width="${sw}"/>`;
             svg += `<line x1="${w-inset}" y1="0" x2="${w-inset}" y2="${h}" stroke="${stroke}" stroke-width="${sw}"/>`;
         }
         // Trapezoid
-        else if (shape === 'trapezoid' || styleStr.includes('shape=trapezoid')) {
+        else if (is('trapezoid')) {
             const inset = w * 0.2;
             svg += `<polygon points="${inset},0 ${w-inset},0 ${w},${h} 0,${h}" fill="${fill}" stroke="${stroke}" stroke-width="${sw}"${dash}/>`;
         }
         // Step / chevron
-        else if (shape === 'step' || styleStr.includes('shape=step')) {
+        else if (is('step')) {
             const s = Math.min(w * 0.2, h / 2);
             svg += `<polygon points="0,0 ${w-s},0 ${w},${h/2} ${w-s},${h} 0,${h} ${s},${h/2}" fill="${fill}" stroke="${stroke}" stroke-width="${sw}"${dash}/>`;
         }
         // Card (rectangle with a clipped corner)
-        else if (shape === 'card' || styleStr.includes('shape=card')) {
+        else if (is('card')) {
             const c = Math.min(w, h) * 0.2;
             svg += `<polygon points="${c},0 ${w},0 ${w},${h} 0,${h} 0,${c}" fill="${fill}" stroke="${stroke}" stroke-width="${sw}"${dash}/>`;
+        }
+        // Vendor stencil (AWS / GCP / Azure / mxgraph.* etc.) — no full glyph library
+        // available, so approximate: colored icons become rounded tiles, group/
+        // container stencils (no fill) become transparent bordered frames.
+        else if (isStencil) {
+            const r = Math.min(8, w / 6, h / 6);
+            if (fill === 'none') {
+                svg += `<rect width="${w}" height="${h}" rx="${r}" fill="none" stroke="${stroke === 'none' ? '#999999' : stroke}" stroke-width="${sw}"${dash}/>`;
+            } else {
+                svg += `<rect width="${w}" height="${h}" rx="${r}" fill="${fill}" stroke="${stroke === 'none' ? fill : stroke}" stroke-width="${sw}"${dash}/>`;
+            }
         }
         // Default: Rectangle
         else {
@@ -627,10 +645,16 @@
                 const align = elem.style.align || 'center';          // left | center | right
                 const valign = elem.style.verticalAlign || 'middle';  // top | middle | bottom
                 const vLabelPos = elem.style.verticalLabelPosition;   // bottom => label under shape
-                const pad = 4;
+
+                // drawio spacing: uniform `spacing` plus per-side overrides
+                const sp = parseFloat(elem.style.spacing) || 0;
+                const spL = sp + (parseFloat(elem.style.spacingLeft) || 0) + 2;
+                const spR = sp + (parseFloat(elem.style.spacingRight) || 0) + 2;
+                const spT = sp + (parseFloat(elem.style.spacingTop) || 0);
+                const spB = sp + (parseFloat(elem.style.spacingBottom) || 0);
 
                 const wrap = elem.style.whiteSpace === 'wrap';
-                const lines = wrap ? wrapText(raw, Math.max(w - pad * 2, fs), fs)
+                const lines = wrap ? wrapText(raw, Math.max(w - spL - spR, fs), fs)
                                    : raw.split('\n');
 
                 const lh = fs * 1.25;
@@ -638,8 +662,8 @@
 
                 // Horizontal anchor
                 let tx, anchor;
-                if (align === 'left') { tx = pad; anchor = 'start'; }
-                else if (align === 'right') { tx = w - pad; anchor = 'end'; }
+                if (align === 'left') { tx = spL; anchor = 'start'; }
+                else if (align === 'right') { tx = w - spR; anchor = 'end'; }
                 else { tx = w / 2; anchor = 'middle'; }
 
                 // Vertical start (baseline of first line)
@@ -647,9 +671,9 @@
                 if (vLabelPos === 'bottom') {
                     startY = h + fs + 2;
                 } else if (valign === 'top') {
-                    startY = pad + fs;
+                    startY = spT + fs;
                 } else if (valign === 'bottom') {
-                    startY = h - blockH - pad + fs;
+                    startY = h - blockH - spB + fs;
                 } else {
                     startY = (h - blockH) / 2 + fs;
                 }
